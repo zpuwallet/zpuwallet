@@ -1,0 +1,39 @@
+{
+  "source": "https://hosh.zec.rocks/api/v0/zec.json",
+  "fetchedAt": "2026-06-08T14:59:06.985Z",
+  "count": 2,
+  "servers": [
+    {
+      "url": "https://testnet.zec.rocks",
+      "hostname": "testnet.zec.rocks",
+      "port": 443,
+      "protocol": "grpc",
+      "online": true,
+      "community": false,
+      "tor": false,
+      "height": 4053976,
+      "uptime30d": 0.8495113527812477,
+      "uptime30dPercent": "84.95%",
+      "pingMs": 1400.21,
+      "lightwalletServerVersion": "v0.4.19-zr8",
+      "nodeVersion": "Zebra:5.0.0",
+      "donationAddress": "u157q45z9fwy7349t5r7w4d0tpmdzhw6xvuwm4ucqq80ysftk9wxryrru0l7puxpdlujnkmj5d9ewzaxz5x6slfg3xys4egayx7vry57wd"
+    },
+    {
+      "url": "https://zcash.mysideoftheweb.com:19067",
+      "hostname": "zcash.mysideoftheweb.com",
+      "port": 19067,
+      "protocol": "grpc",
+      "online": true,
+      "community": false,
+      "tor": false,
+      "height": 4053976,
+      "uptime30d": 0.3387179487179487,
+      "uptime30dPercent": "33.87%",
+      "pingMs": 82.46,
+      "lightwalletServerVersion": "v0.4.19",
+      "nodeVersion": "Zebra:5.0.0",
+      "donationAddress": null
+    }
+  ]
+}

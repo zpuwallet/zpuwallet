@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:toastification/toastification.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/network.dart';
 import 'package:zkool/src/rust/frb_generated.dart';
+import 'package:zkool/theme_mode.dart';
 import 'package:zkool/utils.dart';
 
 final logger = Logger(filter: ProductionFilter());
@@ -20,7 +20,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await RustLib.init();
-  final dataDir = await getApplicationDocumentsDirectory();
+  final dataDir = await getDataDirectory();
   await initDatadir(directory: dataDir.path);
   final prefs = SharedPreferencesAsync();
   final recovery = await prefs.getBool("recovery") ?? false;
@@ -37,13 +37,18 @@ Future<void> main() async {
             const TooltipActionButton(type: TooltipDefaultActionType.next, backgroundColor: Colors.transparent),
           ],
           builder: (context) {
-            return MaterialApp.router(
-              key: appKey,
-              routerConfig: r,
-              themeMode: ThemeMode.system,
-              theme: ThemeData.light(),
-              darkTheme: ThemeData.dark(),
-              debugShowCheckedModeBanner: false,
+            return Consumer(
+              builder: (context, ref, _) {
+                final appTheme = ref.watch(themeModeProvider);
+                return MaterialApp.router(
+                  key: appKey,
+                  routerConfig: r,
+                  themeMode: themeModeFor(appTheme),
+                  theme: lightThemeFor(appTheme),
+                  darkTheme: zcashDarkTheme,
+                  debugShowCheckedModeBanner: false,
+                );
+              },
             );
           },
         ),

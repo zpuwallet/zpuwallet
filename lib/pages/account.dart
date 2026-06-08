@@ -135,6 +135,8 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
 
     Future(tutorial);
 
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(fullDataAV.value?.currentAccount?.account.name ?? "Loading"),
@@ -148,6 +150,24 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
               icon: Icon(Icons.sync),
             ),
           ),
+          if (!isMobile)
+            IconButton(
+              tooltip: "Edit Account",
+              onPressed: fullDataAV.value?.currentAccount != null ? () => onEdit(fullDataAV.value!.currentAccount!.account) : null,
+              icon: Icon(Icons.edit),
+            ),
+          if (!isMobile)
+            IconButton(
+              tooltip: "Backup Seed & Keys",
+              onPressed: fullDataAV.value?.currentAccount != null ? () => onBackup(fullDataAV.value!.currentAccount!.account) : null,
+              icon: Icon(Icons.save),
+            ),
+          if (!isMobile)
+            IconButton(
+              tooltip: "Remove Account",
+              onPressed: fullDataAV.value?.currentAccount != null ? () => onRemove(fullDataAV.value!.currentAccount!.account) : null,
+              icon: Icon(Icons.delete, color: Theme.of(context).colorScheme.error),
+            ),
           Showcase(
             key: receiveID,
             description: "Show the account receiving addresses",
@@ -160,7 +180,14 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
           ),
           PopupMenuButton<String>(
             onSelected: (String result) async {
+              final account = fullDataAV.value?.currentAccount?.account;
               switch (result) {
+                case "edit":
+                  if (account != null) onEdit(account);
+                case "backup":
+                  if (account != null) onBackup(account);
+                case "remove":
+                  if (account != null) onRemove(account);
                 case "update_fx":
                   onUpdateAllTxPrices();
                 case "charts":
@@ -170,6 +197,21 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
               }
             },
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              if (isMobile)
+                const PopupMenuItem<String>(
+                  value: "edit",
+                  child: Text("Edit Account"),
+                ),
+              if (isMobile)
+                const PopupMenuItem<String>(
+                  value: "backup",
+                  child: Text("Backup Seed & Keys"),
+                ),
+              if (isMobile)
+                PopupMenuItem<String>(
+                  value: "remove",
+                  child: Text("Remove Account", style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
               const PopupMenuItem<String>(
                 value: "update_fx",
                 child: Text("Fetch Tx Prices"),
@@ -204,9 +246,10 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
           }
 
           final b = account.balance.field0;
+          final fxCurrency = ref.watch(appSettingsProvider).value?.fxCurrency ?? "usd";
           final fiat = fullData.price?.let((p) {
             final f = (b[0] + b[1] + b[2]).toDouble() * p / zatsPerZec.toDouble();
-            return "\$ ${fiatFormatter.format(f)}";
+            return "${fxSymbol(fxCurrency)}${fiatFormatter.format(f)}";
           });
 
           final t = Theme.of(context);
@@ -268,7 +311,7 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
                               ),
                             ),
                           ),
-                          ...showTxHistory(context, account.transactions),
+                          ...showTxHistory(context, account.transactions, currentHeight: ref.watch(currentHeightProvider)),
                         ],
                       ),
                       showMemos(context, account.memos),
@@ -296,6 +339,34 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
     await GoRouter.of(context).push("/receive");
   }
 
+  void onEdit(Account account) async {
+    await GoRouter.of(context).push("/account/edit", extra: [account]);
+  }
+
+  void onBackup(Account account) async {
+    final authenticated = await authenticate(reason: "Backup Seed & Keys");
+    if (!authenticated) return;
+    if (!mounted) return;
+    await GoRouter.of(context).push("/viewing_keys", extra: account.id);
+  }
+
+  void onRemove(Account account) async {
+    final confirmed = await confirmDialog(
+      context,
+      title: "Remove Account",
+      message:
+          "Remove '${account.name}'? This deletes the account and its data from this device. Make sure you have backed up the seed/keys.",
+    );
+    if (!confirmed) return;
+    try {
+      await deleteAccount(account: account.id, c: c);
+      ref.invalidate(getAccountsProvider);
+      if (mounted) GoRouter.of(context).go("/");
+    } on AnyhowException catch (e) {
+      if (mounted) await showException(context, e.message);
+    }
+  }
+
   void onSend() async {
     await GoRouter.of(context).push("/send");
   }
@@ -306,7 +377,7 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
         await confirmDialog(context, title: "Fetch Tx Market Price", message: "Do you want to retrieve historical ZEC prices for your past transactions?");
     if (confirmed) {
       try {
-        await fillMissingTxPrices(c: c, api: settings.coingecko);
+        await fillMissingTxPrices(c: c, api: settings.coingecko, currency: settings.fxCurrency);
       } on AnyhowException catch (e) {
         if (mounted) await showException(context, e.message);
       }
@@ -811,7 +882,7 @@ class BalanceWidget extends StatelessWidget {
   }
 }
 
-List<Widget> showTxHistory(BuildContext context, List<Tx> transactions) {
+List<Widget> showTxHistory(BuildContext context, List<Tx> transactions, {int? currentHeight}) {
   final t = Theme.of(context).textTheme;
   return [
     SliverToBoxAdapter(
@@ -829,6 +900,11 @@ List<Widget> showTxHistory(BuildContext context, List<Tx> transactions) {
       itemBuilder: (context, index) {
         final tx = transactions[index];
         final (color, icon, label) = getTransactionType(tx.tpe);
+        // Confirmations = blocks mined on top of (and including) the tx block.
+        // Only shown for mined txs (height > 0) once the current height is known.
+        final int? confirmations = (currentHeight != null && tx.height > 0)
+            ? (currentHeight - tx.height + 1).clamp(0, 1 << 30)
+            : null;
         final tile = TransactionTile(
           icon: icon,
           color: color,
@@ -839,6 +915,7 @@ List<Widget> showTxHistory(BuildContext context, List<Tx> transactions) {
           onTap: () => gotoTransaction(context, tx.id),
           zsaValue: tx.zsaValue != 0 ? BigInt.from(tx.zsaValue) : null,
           zsaLabel: tx.zsaValue != 0 ? tx.assetDisplay : null,
+          confirmations: confirmations,
         );
 
         return Column(children: [
@@ -1004,7 +1081,7 @@ class ViewingKeysPageState extends ConsumerState<ViewingKeysPage> {
   String? fingerprint;
   Seed? seed;
   int accountPools = 7; // default to all pools
-  bool showSeed = false;
+  bool showSeed = true;
 
   @override
   void initState() {
@@ -1026,7 +1103,14 @@ class ViewingKeysPageState extends ConsumerState<ViewingKeysPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Viewing Keys'),
-        actions: [if (seed != null) IconButton(tooltip: "Show Seed Phrase", onPressed: onShowSeed, icon: Icon(Icons.key))],
+        actions: [
+          if (seed != null)
+            IconButton(
+              tooltip: showSeed ? "Hide Seed Phrase" : "Show Seed Phrase",
+              onPressed: onShowSeed,
+              icon: Icon(showSeed ? Icons.key_off : Icons.key),
+            ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -1074,6 +1158,11 @@ class ViewingKeysPageState extends ConsumerState<ViewingKeysPage> {
   }
 
   void onShowSeed() async {
+    // Hiding needs no auth; revealing requires authentication.
+    if (showSeed) {
+      setState(() => showSeed = false);
+      return;
+    }
     final authenticated = await authenticate(reason: "Show Seed Phrase");
     if (!authenticated) return;
     setState(() {

@@ -8,7 +8,23 @@ class DisplayPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
+    // In dark mode, drop the gradient/shadow in favor of a flat surface with an
+    // outline (using the accent color) for a cleaner look.
+    if (isDark) {
+      return Container(
+        padding: EdgeInsetsGeometry.all(16),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cs.primary.withAlpha(120)),
+        ),
+        child: child,
+      );
+    }
 
     return Container(
       padding: EdgeInsetsGeometry.all(16),
@@ -88,6 +104,7 @@ class TransactionTile extends StatelessWidget {
   final void Function()? onTap;
   final BigInt? zsaValue;
   final String? zsaLabel;
+  final int? confirmations;
 
   const TransactionTile({
     super.key,
@@ -100,6 +117,7 @@ class TransactionTile extends StatelessWidget {
     this.onTap,
     this.zsaValue,
     this.zsaLabel,
+    this.confirmations,
   });
 
   @override
@@ -116,7 +134,19 @@ class TransactionTile extends StatelessWidget {
         ),
         child: Icon(icon, color: color),
       ),
-      title: Text(label),
+      title: confirmations != null
+          ? Builder(builder: (context) {
+              final base = DefaultTextStyle.of(context).style;
+              final smaller = base.fontSize == null ? null : base.fontSize! * 0.8;
+              return Text.rich(TextSpan(children: [
+                TextSpan(text: label),
+                TextSpan(
+                  text: " ( $confirmations conf )",
+                  style: TextStyle(fontSize: smaller, color: base.color?.withAlpha(160)),
+                ),
+              ]));
+            })
+          : Text(label),
       subtitle: d,
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,

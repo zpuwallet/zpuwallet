@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:awesome_dialog/awesome_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_passkey_service/pigeons/messages.g.dart' show PasskeyException;
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
 import 'package:gap/gap.dart';
@@ -11,15 +14,45 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/coin.dart';
 import 'package:zkool/src/rust/api/db.dart';
 import 'package:zkool/src/rust/api/sync.dart';
 import 'package:zkool/src/rust/api/account.dart';
 import 'package:zkool/store.dart';
+import 'package:zkool/theme_mode.dart';
 import 'package:zkool/utils.dart';
 import 'package:zkool/widgets/error_display.dart';
 import 'package:zkool/main.dart';
+
+/// Named mainnet block-explorer templates. Each maps a display label to a URL
+/// template with a {txid} placeholder (no network placeholder — these are the
+/// mainnet hosts).
+const Map<String, String> kBlockExplorers = {
+  "zcashexplorer.app": "https://mainnet.zcashexplorer.app/transactions/{txid}",
+  "zcashinfo.com": "https://zcashinfo.com/tx/{txid}",
+  "cipherscan.app": "https://cipherscan.app/tx/{txid}",
+};
+
+/// Named testnet block-explorer templates (testnet hosts of the same explorers).
+const Map<String, String> kTestnetBlockExplorers = {
+  "testnet.zcashexplorer.app": "https://testnet.zcashexplorer.app/transactions/{txid}",
+  "testnet.cipherscan.app": "https://testnet.cipherscan.app/tx/{txid}",
+};
+
+/// The explorer set to offer for [net] (testnet has its own hosts; regtest has
+/// none; everything else uses the mainnet set).
+Map<String, String> blockExplorersFor(ZNetwork net) {
+  switch (net) {
+    case ZNetwork.testnet:
+      return kTestnetBlockExplorers;
+    case ZNetwork.regtest:
+      return const {};
+    case ZNetwork.mainnet:
+      return kBlockExplorers;
+  }
+}
 
 final logID = GlobalKey();
 final lightnodeID = GlobalKey();
@@ -80,8 +113,10 @@ class SettingsPageState extends ConsumerState<SettingsPage> with RouteAware {
         await prefs.setBool("pin_lock", settings.needPin);
         await prefs.setBool("offline", settings.offline);
         await prefs.setBool("use_tor", settings.useTor);
+        await putProp(key: "proxy", value: settings.proxy, c: c);
         await prefs.setBool("get_fx", settings.getFx);
         await prefs.setString("coingecko", settings.coingecko);
+        await prefs.setString("fx_currency", settings.fxCurrency);
         await putProp(key: "qr_enabled", value: settings.qrSettings.enabled.toString(), c: c);
         await putProp(key: "qr_size", value: settings.qrSettings.size.toString(), c: c);
         await putProp(key: "qr_ecLevel", value: settings.qrSettings.ecLevel.toString(), c: c);
@@ -89,10 +124,11 @@ class SettingsPageState extends ConsumerState<SettingsPage> with RouteAware {
         await putProp(key: "qr_repair", value: settings.qrSettings.repair.toString(), c: c);
         c = c.setLwd(url: settings.lwd, serverType: settings.isLightNode ? 0 : 1);
         c = await c.setUseTor(useTor: settings.useTor);
+        c = c.setProxy(proxy: settings.proxy);
         await prefs.setBool("vault", settings.vault);
         await prefs.setBool("expert_mode", settings.expertMode);
         coinContext.set(coin: c);
-        ref.read(priceProvider.notifier).setAutoFetchFx(settings.getFx, settings.coingecko);
+        ref.read(priceProvider.notifier).setAutoFetchFx(settings.getFx, settings.coingecko, settings.fxCurrency);
         ref.invalidate(appSettingsProvider);
       },
     );
@@ -113,12 +149,35 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
 
   String dbFullPath = "";
   String versionString = "";
+  List<String> topServers = [];
+  bool forceCustomServer = false;
+  static const String customServer = "__custom__";
+  bool forceCustomExplorer = false;
+  static const String customExplorer = "__custom__";
 
   @override
   void initState() {
     super.initState();
     Future(() async {
       dbFullPath = await getFullDatabasePath(settings.dbName);
+      // Server list is network-specific: mainnet and testnet use the bundled
+      // top-server lists (servers.json / servers_testnet.json); regtest runs
+      // against a local full node so it only offers its hardcoded default. When
+      // the bundled testnet list is empty (e.g. an older bundle), fall back to
+      // the hardcoded testnet defaults so the dropdown is never empty.
+      final net = networkForName(settings.net);
+      switch (net) {
+        case ZNetwork.mainnet:
+          topServers = await loadTopServers();
+          break;
+        case ZNetwork.testnet:
+          final fromJson = await loadTopServers(asset: 'servers/servers_testnet.json');
+          topServers = fromJson.isNotEmpty ? fromJson : networkInfo(net).servers;
+          break;
+        case ZNetwork.regtest:
+          topServers = networkInfo(net).servers;
+          break;
+      }
       final packageInfo = await PackageInfo.fromPlatform();
       final version = packageInfo.version;
       final buildNumber = packageInfo.buildNumber;
@@ -126,6 +185,26 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
       setState(() {});
     });
   }
+
+  // Whether to show the free-form LWD URL field: when the user explicitly chose
+  // "Custom…", or the current server isn't one of the bundled top servers.
+  bool get showCustomServerField => forceCustomServer || !topServers.contains(settings.lwd);
+
+  // The explorers offered for the active network.
+  Map<String, String> get explorers => blockExplorersFor(networkForName(settings.net));
+
+  // The label of the currently-selected named explorer, or null if the stored
+  // template isn't one of the bundled explorers (i.e. a custom URL).
+  String? get currentExplorerLabel {
+    for (final e in explorers.entries) {
+      if (e.value == settings.blockExplorer) return e.key;
+    }
+    return null;
+  }
+
+  // Show the free-form explorer URL field when "Custom Explorer" was chosen, or
+  // the stored template isn't one of the bundled explorers.
+  bool get showCustomExplorerField => forceCustomExplorer || currentExplorerLabel == null;
 
   void tutorial() async {
     tutorialHelper(context, "tutSettings0",
@@ -158,6 +237,26 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
             child: Column(
               children: [
+                Consumer(
+                  builder: (context, ref, _) {
+                    final appTheme = ref.watch(themeModeProvider);
+                    return FormBuilderDropdown<AppTheme>(
+                      name: "theme",
+                      decoration: const InputDecoration(labelText: "Theme"),
+                      initialValue: appTheme,
+                      items: const [
+                        DropdownMenuItem(value: AppTheme.zkool, child: Text("Zkool")),
+                        DropdownMenuItem(value: AppTheme.dark, child: Text("Dark")),
+                        DropdownMenuItem(value: AppTheme.light, child: Text("Light")),
+                        DropdownMenuItem(value: AppTheme.system, child: Text("System")),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) ref.read(themeModeProvider.notifier).set(value);
+                      },
+                    );
+                  },
+                ),
+                Gap(8),
                 Showcase(
                   key: lightnodeID,
                   description: "Whether the server is a light node or not",
@@ -168,27 +267,86 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
                     onChanged: onChangedIsLightNode,
                   ),
                 ),
-                Showcase(
-                  key: lwdID,
-                  description: "Node server to connect to",
-                  child: FormBuilderTextField(
-                    name: "lwd",
-                    decoration: InputDecoration(labelText: "${settings.isLightNode ? 'Light' : 'Full'} Node Server"),
-                    initialValue: settings.lwd,
-                    onChanged: onChangedLWD,
-                  ),
-                ),
-                if (settings.isLightNode)
+                if (settings.isLightNode && topServers.isNotEmpty)
+                  Builder(builder: (context) {
+                    final isMobile = MediaQuery.of(context).size.width < 600;
+                    final dropdown = FormBuilderDropdown<String>(
+                      name: "server",
+                      isDense: true,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: isMobile ? "Light Node Server" : null,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        border: const OutlineInputBorder(),
+                      ),
+                      initialValue: topServers.contains(settings.lwd) ? settings.lwd : customServer,
+                      items: [
+                        ...topServers.map((s) => DropdownMenuItem(
+                              value: s,
+                              child: Text(s, overflow: TextOverflow.ellipsis, maxLines: 1),
+                            )),
+                        const DropdownMenuItem(value: customServer, child: Text("Custom…")),
+                      ],
+                      onChanged: onChangedServer,
+                    );
+                    if (isMobile) return dropdown;
+                    return Row(
+                      children: [
+                        const Expanded(child: Text("Light Node Server")),
+                        SizedBox(
+                          width: 324,
+                          child: dropdown,
+                        ),
+                      ],
+                    );
+                  }),
+                if (!settings.isLightNode || showCustomServerField)
                   Showcase(
-                    key: torID,
-                    description: "Use TOR to connect to lightwallet server. Need App Restart",
-                    child: FormBuilderSwitch(
-                      name: "tor",
-                      title: Text("Use TOR"),
-                      initialValue: settings.useTor,
-                      onChanged: onChangedUseTOR,
+                    key: lwdID,
+                    description: "Node server to connect to",
+                    child: FormBuilderTextField(
+                      name: "lwd",
+                      decoration: InputDecoration(labelText: "${settings.isLightNode ? 'Light' : 'Full'} Node Server"),
+                      initialValue: settings.lwd,
+                      onChanged: onChangedLWD,
                     ),
                   ),
+                Showcase(
+                  key: torID,
+                  description: "Route every server connection through a proxy. "
+                      "Supports socks5://, socks5h://, http:// and https://. "
+                      "Tap the Tor button to use a local Tor SOCKS5 proxy. Leave empty for a direct connection. Needs App Restart",
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: FormBuilderTextField(
+                          name: "proxy",
+                          decoration: InputDecoration(
+                            labelText: "HTTP / SOCKS5 Proxy",
+                            hintText: torProxyUrl,
+                          ),
+                          initialValue: settings.proxy,
+                          onChanged: onChangedProxy,
+                        ),
+                      ),
+                      const Gap(8),
+                      IconButton.outlined(
+                        tooltip: "Use Tor (prefill $torProxyUrl)",
+                        onPressed: onEnableTor,
+                        icon: SvgPicture.asset(
+                          "assets/tor.svg",
+                          width: 22,
+                          height: 22,
+                          colorFilter: ColorFilter.mode(
+                            Theme.of(context).colorScheme.primary,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 Showcase(
                   key: actionsID,
                   description: "Number actions per synchronization chunk",
@@ -246,6 +404,28 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
                   child: FormBuilderSwitch(name: "fx", title: Text("Auto Fetch Market Price"), initialValue: settings.getFx, onChanged: onGetFxChanged),
                 ),
                 Gap(8),
+                Row(
+                  children: [
+                    const Expanded(child: Text("Market Price Currency")),
+                    SizedBox(
+                      width: 120,
+                      child: FormBuilderDropdown<String>(
+                        name: "fx_currency",
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          border: OutlineInputBorder(),
+                        ),
+                        initialValue: fxCurrencies.contains(settings.fxCurrency) ? settings.fxCurrency : "usd",
+                        items: fxCurrencies
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c.toUpperCase())))
+                            .toList(),
+                        onChanged: onChangedFxCurrency,
+                      ),
+                    ),
+                  ],
+                ),
+                Gap(8),
                 Showcase(
                   key: coingeckoID,
                   description: "CoinGecko API Key. Register for an account on their website",
@@ -261,16 +441,44 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
                 Gap(8),
                 Showcase(
                   key: blockExplorerID,
-                  description: "Block Explorer URL",
-                  child: FormBuilderTextField(
+                  description: "Block Explorer used to open transactions",
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text("Block Explorer")),
+                      SizedBox(
+                        width: 200,
+                        child: FormBuilderDropdown<String>(
+                          name: "explorer",
+                          isDense: true,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            border: OutlineInputBorder(),
+                          ),
+                          initialValue: currentExplorerLabel ?? customExplorer,
+                          items: [
+                            ...explorers.keys.map((label) => DropdownMenuItem(
+                                  value: label,
+                                  child: Text(label, overflow: TextOverflow.ellipsis, maxLines: 1),
+                                )),
+                            const DropdownMenuItem(value: customExplorer, child: Text("Custom Explorer")),
+                          ],
+                          onChanged: onChangedExplorer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (showCustomExplorerField)
+                  FormBuilderTextField(
                     name: "block_explorer",
-                    decoration: InputDecoration(
-                      label: Text("Block Explorer"),
+                    decoration: const InputDecoration(
+                      labelText: "Custom Explorer URL",
+                      hintText: "https://host/tx/{txid}",
                     ),
                     initialValue: settings.blockExplorer,
                     onChanged: onChangedBlockExplorer,
                   ),
-                ),
                 Gap(8),
                 Showcase(
                   key: useQRID,
@@ -352,6 +560,22 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
     });
   }
 
+  void onChangedServer(String? value) async {
+    if (value == null) return;
+    if (value == customServer) {
+      // Reveal the free-form URL field; keep the current lwd so it stays
+      // editable.
+      setState(() => forceCustomServer = true);
+      return;
+    }
+    // A bundled server was selected: use it as the active LWD URL.
+    setState(() {
+      forceCustomServer = false;
+      settings = settings.copyWith(lwd: value);
+      widget.onChanged(settings);
+    });
+  }
+
   void onChangedCoingecko(String? value) async {
     if (value == null) return;
     setState(() {
@@ -368,6 +592,23 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
     });
   }
 
+  void onChangedExplorer(String? value) async {
+    if (value == null) return;
+    if (value == customExplorer) {
+      // Reveal the free-form URL field; keep the current template editable.
+      setState(() => forceCustomExplorer = true);
+      return;
+    }
+    // A bundled explorer was selected: store its URL template.
+    final template = explorers[value];
+    if (template == null) return;
+    setState(() {
+      forceCustomExplorer = false;
+      settings = settings.copyWith(blockExplorer: template);
+      widget.onChanged(settings);
+    });
+  }
+
   onChangedIsLightNode(bool? value) async {
     if (value == null) return;
     setState(() {
@@ -376,10 +617,28 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
     });
   }
 
-  onChangedUseTOR(bool? value) async {
+  void onChangedProxy(String? value) async {
     if (value == null) return;
     setState(() {
-      settings = settings.copyWith(useTor: value);
+      settings = settings.copyWith(proxy: value);
+      widget.onChanged(settings);
+    });
+  }
+
+  // On Windows the common Tor setup is the Tor Browser bundle, whose SOCKS
+  // proxy listens on 9150. Elsewhere the standalone tor daemon defaults to 9050.
+  //
+  // We use the socks5h:// scheme (not socks5://) so DNS resolution happens at
+  // the proxy. This is required for .onion server addresses to resolve and also
+  // prevents DNS leaks when routing over Tor.
+  static String get torProxyUrl =>
+      Platform.isWindows ? "socks5h://127.0.0.1:9150" : "socks5h://127.0.0.1:9050";
+
+  void onEnableTor() async {
+    final url = torProxyUrl;
+    formKey.currentState?.fields["proxy"]?.didChange(url);
+    setState(() {
+      settings = settings.copyWith(proxy: url);
       widget.onChanged(settings);
     });
   }
@@ -413,6 +672,14 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
     if (value == null) return;
     setState(() {
       settings = settings.copyWith(getFx: value);
+      widget.onChanged(settings);
+    });
+  }
+
+  void onChangedFxCurrency(String? value) async {
+    if (value == null) return;
+    setState(() {
+      settings = settings.copyWith(fxCurrency: value);
       widget.onChanged(settings);
     });
   }

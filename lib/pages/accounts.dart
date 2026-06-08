@@ -8,6 +8,7 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:zkool/main.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/pages/account.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/account.dart';
@@ -20,6 +21,7 @@ import 'package:zkool/widgets/theme.dart';
 
 final heightID = GlobalKey();
 final settingsID = GlobalKey();
+final networkID = GlobalKey();
 final syncID = GlobalKey();
 
 final accountListID = GlobalKey();
@@ -65,7 +67,7 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
       currentHeight.setHeight(height);
       if (fetchPrice) {
         final currentPrice = ref.read(priceProvider.notifier);
-        await currentPrice.fetch(settings.coingecko);
+        await currentPrice.fetch(settings.coingecko, settings.fxCurrency);
       }
     } on AnyhowException catch (e) {
       if (mounted) await showException(context, e.message);
@@ -73,7 +75,7 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
   }
 
   void tutorial() async {
-    tutorialHelper(context, "tutMain0", [newAccountId, settingsID, syncID, heightID]);
+    tutorialHelper(context, "tutMain0", [newAccountId, networkID, settingsID, syncID, heightID]);
 
     final accounts = await ref.read(getAccountsProvider.future);
     if (!mounted) return;
@@ -118,7 +120,10 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
                 ),
               ),
               const Gap(8),
-              if (pageData.price != null) ElevatedButton(onPressed: !Platform.isLinux ? onPrice : null, child: Text("Price: ${pageData.price} USD")),
+              if (pageData.price != null)
+                ElevatedButton(
+                    onPressed: !Platform.isLinux ? onPrice : null,
+                    child: Text("Price: ${pageData.price} ${pageData.settings.fxCurrency.toUpperCase()}")),
               const Gap(8),
               if (pageData.settings.offline) ...[
                 Text("Wallet is in offline mode", style: tt.labelSmall),
@@ -131,21 +136,25 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
                 final f = account.balance.toDouble() * p / zatsPerZec.toDouble();
                 return fiatFormatter.format(f);
               });
-              return Material(
+              return Padding(
                 key: ValueKey(account.id),
-                child: GestureDetector(
-                  child: AccountCard(
-                    leading: account.id == 1 ? Showcase(key: avatarID, description: "Tap to select for edit/delete", child: avatar) : avatar,
-                    name: account.name,
-                    balance: zatToText(account.balance, selectable: false, style: tt.titleLarge!.copyWith(fontWeight: FontWeight.w700)),
-                    fiat: fiat != null ? Text("\$$fiat", style: tt.titleSmall!.copyWith(color: Colors.green)) : null,
-                    height: SmallProgressWidget(account, style: tt.labelSmall),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Material(
+                  child: GestureDetector(
+                    child: AccountCard(
+                      leading: account.id == 1 ? Showcase(key: avatarID, description: "Tap to select for edit/delete", child: avatar) : avatar,
+                      name: account.name,
+                      balance: zatToText(account.balance, selectable: false, style: tt.titleLarge!.copyWith(fontWeight: FontWeight.w700)),
+                      fiat: fiat != null ? Text("${fxSymbol(pageData.settings.fxCurrency)}$fiat", style: tt.titleSmall!.copyWith(color: Colors.green)) : null,
+                      height: SmallProgressWidget(account, style: tt.labelSmall),
+                    ),
+                    onTap: () => onOpen(context, account),
+                    onLongPressStart: (details) => onSelectChanged?.call(!(selected ?? false)),
                   ),
-                  onTap: () => onOpen(context, account),
                 ),
               );
             },
-            title: "Account List",
+            title: networkTitle(appName, networkForName(pageData.settings.net)),
             createBuilder: (context) => GoRouter.of(context).push("/account/new"),
             editBuilder: (context, a) => GoRouter.of(context).push("/account/edit", extra: a),
             deleteBuilder: (context, accounts) async {
@@ -160,6 +169,11 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
             isEqual: (a, b) => a.id == b.id,
             onReorder: onReorder,
             buttons: [
+              Showcase(
+                key: networkID,
+                description: "Switch the active network (Mainnet / Testnet / Regtest)",
+                child: IconButton(onPressed: onSwitchNetwork, icon: Icon(Icons.public)),
+              ),
               Showcase(key: settingsID, description: "Open Settings", child: IconButton(onPressed: onSettings, icon: Icon(Icons.settings))),
               Showcase(
                 key: syncID,
@@ -275,6 +289,10 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
     if (authenticated) {
       await GoRouter.of(context).push('/settings');
     }
+  }
+
+  void onSwitchNetwork() async {
+    await GoRouter.of(context).push('/networks');
   }
 
   void onPrice() {
