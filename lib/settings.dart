@@ -11,8 +11,9 @@ import 'package:form_builder_validators/form_builder_validators.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zkool/prefs.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/coin.dart';
 import 'package:zkool/src/rust/api/db.dart';
@@ -22,6 +23,34 @@ import 'package:zkool/store.dart';
 import 'package:zkool/utils.dart';
 import 'package:zkool/widgets/error_display.dart';
 import 'package:zkool/main.dart';
+
+/// Named mainnet block-explorer templates. Each maps a display label to a URL
+/// template with a {txid} placeholder (no network placeholder — these are the
+/// mainnet hosts).
+const Map<String, String> kBlockExplorers = {
+  "zcashexplorer.app": "https://mainnet.zcashexplorer.app/transactions/{txid}",
+  "zcashinfo.com": "https://zcashinfo.com/tx/{txid}",
+  "cipherscan.app": "https://cipherscan.app/tx/{txid}",
+};
+
+/// Named testnet block-explorer templates (testnet hosts of the same explorers).
+const Map<String, String> kTestnetBlockExplorers = {
+  "testnet.zcashexplorer.app": "https://testnet.zcashexplorer.app/transactions/{txid}",
+  "testnet.cipherscan.app": "https://testnet.cipherscan.app/tx/{txid}",
+};
+
+/// The explorer set to offer for [net] (testnet has its own hosts; regtest has
+/// none; everything else uses the mainnet set).
+Map<String, String> blockExplorersFor(ZNetwork net) {
+  switch (net) {
+    case ZNetwork.testnet:
+      return kTestnetBlockExplorers;
+    case ZNetwork.regtest:
+      return const {};
+    case ZNetwork.mainnet:
+      return kBlockExplorers;
+  }
+}
 
 final logID = GlobalKey();
 final lightnodeID = GlobalKey();
@@ -72,7 +101,7 @@ class SettingsPageState extends ConsumerState<SettingsPage> with RouteAware {
     return SettingsForm(
       settings!,
       onChanged: (settings) async {
-        final prefs = SharedPreferencesAsync();
+        final prefs = AppPrefs();
         await prefs.setString("database", settings.dbName);
         await putProp(key: "is_light_node", value: settings.isLightNode.toString(), c: c);
         await putProp(key: "lwd", value: settings.lwd, c: c);
@@ -85,6 +114,7 @@ class SettingsPageState extends ConsumerState<SettingsPage> with RouteAware {
         await putProp(key: "proxy", value: settings.proxy, c: c);
         await prefs.setBool("get_fx", settings.getFx);
         await prefs.setString("coingecko", settings.coingecko);
+        await prefs.setString("fx_currency", settings.fxCurrency);
         await putProp(key: "qr_enabled", value: settings.qrSettings.enabled.toString(), c: c);
         await putProp(key: "qr_size", value: settings.qrSettings.size.toString(), c: c);
         await putProp(key: "qr_ecLevel", value: settings.qrSettings.ecLevel.toString(), c: c);
@@ -98,7 +128,7 @@ class SettingsPageState extends ConsumerState<SettingsPage> with RouteAware {
         await prefs.setString("palette_name", settings.paletteName);
         await prefs.setBool("dark_mode", settings.darkMode);
         coinContext.set(coin: c);
-        ref.read(priceProvider.notifier).setAutoFetchFx(settings.getFx, settings.coingecko);
+        ref.read(priceProvider.notifier).setAutoFetchFx(settings.getFx, settings.coingecko, settings.fxCurrency);
         ref.invalidate(appSettingsProvider);
       },
     );
@@ -119,6 +149,8 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
 
   String dbFullPath = "";
   String versionString = "";
+  bool forceCustomExplorer = false;
+  static const String customExplorer = "__custom__";
 
   @override
   void initState() {
@@ -132,6 +164,22 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
       setState(() {});
     });
   }
+
+  // The explorers offered for the active network.
+  Map<String, String> get explorers => blockExplorersFor(networkForName(settings.net));
+
+  // The label of the currently-selected named explorer, or null if the stored
+  // template isn't one of the bundled explorers (i.e. a custom URL).
+  String? get currentExplorerLabel {
+    for (final e in explorers.entries) {
+      if (e.value == settings.blockExplorer) return e.key;
+    }
+    return null;
+  }
+
+  // Show the free-form explorer URL field when "Custom Explorer" was chosen, or
+  // the stored template isn't one of the bundled explorers.
+  bool get showCustomExplorerField => forceCustomExplorer || currentExplorerLabel == null;
 
   void tutorial() async {
     tutorialHelper(context, "tutSettings0",
@@ -298,6 +346,28 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
                   child: FormBuilderSwitch(name: "fx", title: Text("Auto Fetch Market Price"), initialValue: settings.getFx, onChanged: onGetFxChanged),
                 ),
                 Gap(8),
+                Row(
+                  children: [
+                    const Expanded(child: Text("Market Price Currency")),
+                    SizedBox(
+                      width: 120,
+                      child: FormBuilderDropdown<String>(
+                        name: "fx_currency",
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          border: OutlineInputBorder(),
+                        ),
+                        initialValue: fxCurrencies.contains(settings.fxCurrency) ? settings.fxCurrency : "usd",
+                        items: fxCurrencies
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c.toUpperCase())))
+                            .toList(),
+                        onChanged: onChangedFxCurrency,
+                      ),
+                    ),
+                  ],
+                ),
+                Gap(8),
                 Showcase(
                   key: coingeckoID,
                   description: "CoinGecko API Key. Register for an account on their website",
@@ -313,16 +383,44 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
                 Gap(8),
                 Showcase(
                   key: blockExplorerID,
-                  description: "Block Explorer URL",
-                  child: FormBuilderTextField(
+                  description: "Block Explorer used to open transactions",
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text("Block Explorer")),
+                      SizedBox(
+                        width: 200,
+                        child: FormBuilderDropdown<String>(
+                          name: "explorer",
+                          isDense: true,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            border: OutlineInputBorder(),
+                          ),
+                          initialValue: currentExplorerLabel ?? customExplorer,
+                          items: [
+                            ...explorers.keys.map((label) => DropdownMenuItem(
+                                  value: label,
+                                  child: Text(label, overflow: TextOverflow.ellipsis, maxLines: 1),
+                                )),
+                            const DropdownMenuItem(value: customExplorer, child: Text("Custom Explorer")),
+                          ],
+                          onChanged: onChangedExplorer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (showCustomExplorerField)
+                  FormBuilderTextField(
                     name: "block_explorer",
-                    decoration: InputDecoration(
-                      label: Text("Block Explorer"),
+                    decoration: const InputDecoration(
+                      labelText: "Custom Explorer URL",
+                      hintText: "https://host/tx/{txid}",
                     ),
                     initialValue: settings.blockExplorer,
                     onChanged: onChangedBlockExplorer,
                   ),
-                ),
                 Gap(8),
                 Showcase(
                   key: useQRID,
@@ -350,7 +448,7 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
                 Gap(8),
                 GestureDetector(
                   onLongPress: () async {
-                    final prefs = SharedPreferencesAsync();
+                    final prefs = AppPrefs();
                     final newExpertMode = !settings.expertMode;
                     await prefs.setBool("expert_mode", newExpertMode);
                     setState(() {
@@ -420,6 +518,23 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
     });
   }
 
+  void onChangedExplorer(String? value) async {
+    if (value == null) return;
+    if (value == customExplorer) {
+      // Reveal the free-form URL field; keep the current template editable.
+      setState(() => forceCustomExplorer = true);
+      return;
+    }
+    // A bundled explorer was selected: store its URL template.
+    final template = explorers[value];
+    if (template == null) return;
+    setState(() {
+      forceCustomExplorer = false;
+      settings = settings.copyWith(blockExplorer: template);
+      widget.onChanged(settings);
+    });
+  }
+
   onChangedIsLightNode(bool? value) async {
     if (value == null) return;
     setState(() {
@@ -482,6 +597,14 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
     if (value == null) return;
     setState(() {
       settings = settings.copyWith(getFx: value);
+      widget.onChanged(settings);
+    });
+  }
+
+  void onChangedFxCurrency(String? value) async {
+    if (value == null) return;
+    setState(() {
+      settings = settings.copyWith(fxCurrency: value);
       widget.onChanged(settings);
     });
   }
@@ -809,7 +932,7 @@ class SettingsFormState extends ConsumerState<SettingsForm> {
       message: "The Database Manager will open when you restart the app. Do you want to schedule it now?",
     );
     if (confirmed) {
-      final prefs = SharedPreferencesAsync();
+      final prefs = AppPrefs();
       await prefs.setBool("recovery", true);
       await showMessage(context, "Restart the app to enter the database manager");
     }

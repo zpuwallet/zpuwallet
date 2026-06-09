@@ -142,7 +142,7 @@ final class SyncStateAccountProvider
   }
 }
 
-String _$syncStateAccountHash() => r'cb3d58d81b59192492c0aab60de138055b823f7f';
+String _$syncStateAccountHash() => r'077b360e89d4d12d651500afbadefd05afb6a728';
 
 final class SyncStateAccountFamily extends $Family
     with
@@ -505,7 +505,7 @@ final class AppSettingsNotifierProvider
 }
 
 String _$appSettingsNotifierHash() =>
-    r'a5f94ec12952b3d679b1208165f7d559434d037d';
+    r'522f6c001f796a7da46f8be68bd65ec0819ffafc';
 
 abstract class _$AppSettingsNotifier extends $AsyncNotifier<AppSettings> {
   FutureOr<AppSettings> build();
@@ -555,7 +555,7 @@ final class PriceNotifierProvider
   }
 }
 
-String _$priceNotifierHash() => r'9c6f7b369e9fef6348fa6fdda446294b8c8dac98';
+String _$priceNotifierHash() => r'ca76388759d1d264ce2aafbedfa0e41f9071e221';
 
 abstract class _$PriceNotifier extends $Notifier<double?> {
   double? build();
@@ -751,7 +751,7 @@ final class SynchronizerNotifierProvider
 }
 
 String _$synchronizerNotifierHash() =>
-    r'558e7832444bfa102f87a85a6b00bccda2323e01';
+    r'd7caece15ad12ccf3d6312a96f7aaca37ffae6a8';
 
 abstract class _$SynchronizerNotifier extends $Notifier<SyncState> {
   SyncState build();
@@ -798,7 +798,7 @@ final class TransparentScanProvider
   }
 }
 
-String _$transparentScanHash() => r'8b7776a597f9527392f23125ea5eac64f6568cdf';
+String _$transparentScanHash() => r'4f419010a0204d67ce8a9b608f9b871996e49cbf';
 
 abstract class _$TransparentScan extends $Notifier<String> {
   String build();

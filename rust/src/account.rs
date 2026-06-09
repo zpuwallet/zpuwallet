@@ -169,9 +169,42 @@ pub async fn new_account(
             &seed,
             AccountId::try_from(na.aindex).unwrap(),
         )?;
-        let uvk = usk.to_unified_full_viewing_key();
-        let (_, di) = uvk.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
-        let dindex: u32 = di.try_into()?;
+
+        // Determine the diversifier index for the receive address.
+        //
+        // The receive address must follow the BIP44 Account Index (na.aindex,
+        // already baked into the UnifiedSpendingKey above) and use diversifier
+        // index 0 -> m/44'/133'/aindex'/0/0.
+        //
+        // We must NOT use the unified/Sapling FVK's default_address(), because
+        // default_address() returns the *first valid* diversifier index by
+        // searching forward from 0. For Sapling roughly half of all indices are
+        // invalid, and the unified address is dominated by the Orchard receiver,
+        // so default_address() frequently returns a non-zero value (e.g. 3 or 7).
+        // That made imported mnemonics show a receive address at
+        // m/44'/133'/aindex'/0/3 instead of .../0/0.
+        //
+        // Transparent and Orchard addresses are valid at every index, so they
+        // always use diversifier index 0. The shared account diversifier index
+        // (stored via update_dindex and used by get_addresses for all pools) is
+        // therefore 0 in the normal case. Sapling is the only pool that can have
+        // an invalid diversifier at index 0; only in that (rare) case do we fall
+        // back to the smallest valid Sapling index so we can still store a valid
+        // Sapling address. We prefer 0 whenever it is valid.
+        let dindex: u32 = if pools & 2 != 0 {
+            let sxvk = usk.sapling().to_diversifiable_full_viewing_key();
+            // find_address(0) returns the first valid index at or after 0,
+            // i.e. 0 itself whenever diversifier 0 is valid for this key.
+            match sxvk.find_address(0u32.into()) {
+                Some((di, _)) => {
+                    let di: u128 = di.into();
+                    di as u32
+                }
+                None => 0,
+            }
+        } else {
+            0
+        };
 
         if pools & 1 != 0 {
             init_account_transparent(&mut db_tx, account, birth).await?;
@@ -179,24 +212,28 @@ pub async fn new_account(
             store_account_transparent_sk(&mut db_tx, account, tsk).await?;
             let tvk = &tsk.to_account_pubkey();
             store_account_transparent_vk(&mut db_tx, account, tvk).await?;
-            for di in &[0, dindex] {
-                let sk = derive_transparent_sk(tsk, 0, *di)?;
-                let (pk, taddr) = derive_transparent_address(tvk, 0, *di, false)?;
+            // Transparent addresses are valid at every index; the receive
+            // address is at index 0. We also store the address at `dindex`
+            // (the shared account diversifier) so the unified receive address
+            // is consistent across pools when Sapling forced a non-zero index.
+            let mut tindices = vec![0u32];
+            if dindex != 0 {
+                tindices.push(dindex);
+            }
+            for di in tindices {
+                let sk = derive_transparent_sk(tsk, 0, di)?;
+                let (pk, taddr) = derive_transparent_address(tvk, 0, di, false)?;
                 store_account_transparent_addr(
                     &mut db_tx,
                     account,
                     0,
-                    *di,
+                    di,
                     Some(sk),
                     &pk,
                     &taddr.encode(&network),
                     false,
                 )
                 .await?;
-                // do not create two taddrs if dindex == 0
-                if dindex == 0 {
-                    break;
-                }
             }
         }
 
@@ -773,6 +810,122 @@ pub async fn generate_next_dindex(
         .execute(&mut *db_tx)
         .await?;
 
+    let tkeys = select_account_transparent(&mut db_tx, account, dindex).await?;
+    let (sk, pk, address) = match tkeys.xvk {
+        Some(xvk) => {
+            let sk = tkeys
+                .xsk
+                .as_ref()
+                .map(|tsk| derive_transparent_sk(tsk, 0, dindex).unwrap());
+            let (pk, address) = derive_transparent_address(&xvk, 0, dindex, false)?;
+            (sk, pk, Some(address))
+        }
+        None if hw != 0 => {
+            let (pk, address) = ledger
+                .get_hw_transparent_address(network, aindex, 0, dindex)
+                .await?;
+            (None, pk, Some(address))
+        }
+        _ => (None, vec![], None),
+    };
+
+    if let Some(address) = address {
+        store_account_transparent_addr(
+            &mut db_tx,
+            account,
+            0,
+            dindex,
+            sk,
+            &pk,
+            &address.encode(network),
+            false,
+        )
+        .await?;
+    }
+    db_tx.commit().await?;
+
+    Ok(dindex)
+}
+
+/// Move the account's active diversifier index back to the previous valid
+/// address set. This is the inverse of [`generate_next_dindex`]: it decrements
+/// `dindex` (skipping Sapling-invalid indices) down to a floor of 0, re-points
+/// the stored Sapling address, and ensures the matching transparent receive
+/// address row exists. Returns the new `dindex` (unchanged at 0 if already at
+/// the first valid index).
+pub async fn generate_prev_dindex(
+    network: &Network,
+    connection: &mut SqliteConnection,
+    account: u32,
+) -> Result<u32> {
+    let mut db_tx = connection.begin().await?;
+    let ledger = get_ledger(&mut db_tx, account).await?;
+    let (aindex, dindex): (u32, u32) =
+        sqlx::query_as("SELECT aindex, dindex FROM accounts WHERE id_account = ?")
+            .bind(account)
+            .fetch_one(&mut *db_tx)
+            .await?;
+
+    // Already at the first index; nothing earlier to move to.
+    if dindex == 0 {
+        db_tx.commit().await?;
+        return Ok(0);
+    }
+
+    let hw = get_account_hw(&mut db_tx, account).await?;
+    // Previous Sapling address. Some dindex must be skipped because they do not
+    // correspond to a valid sapling address; we scan downward for the closest
+    // valid index strictly below the current one, with a floor of 0.
+    let svk = get_sapling_vk(&mut db_tx, account).await?;
+    let dindex = if let Some(svk) = svk.as_ref() {
+        let mut candidate = dindex - 1;
+        let new_dindex = loop {
+            if hw != 0 {
+                // On Ledger we cannot cheaply test validity; accept the index.
+                let (_di, address) = ledger
+                    .get_hw_next_diversifier_address(network, aindex, candidate)
+                    .await?;
+                sqlx::query("UPDATE sapling_accounts SET address = ?2 WHERE account = ?1")
+                    .bind(account)
+                    .bind(&address)
+                    .execute(&mut *db_tx)
+                    .await?;
+                break candidate;
+            }
+            match svk.find_address(candidate.into()) {
+                // find_address returns the first VALID index at or after the
+                // requested one. If it lands on `candidate`, that index is valid.
+                Some((di, address)) if u128::from(di) == candidate as u128 => {
+                    sqlx::query("UPDATE sapling_accounts SET address = ?2 WHERE account = ?1")
+                        .bind(account)
+                        .bind(address.encode(network))
+                        .execute(&mut *db_tx)
+                        .await?;
+                    break candidate;
+                }
+                // `candidate` itself is invalid; step further back.
+                _ => {
+                    if candidate == 0 {
+                        // No valid index strictly below; stay where we were.
+                        break candidate;
+                    }
+                    candidate -= 1;
+                }
+            }
+        };
+        new_dindex
+    } else {
+        // without sapling, any dindex is ok, just decrement
+        dindex - 1
+    };
+
+    sqlx::query("UPDATE accounts SET dindex = ? WHERE id_account = ?")
+        .bind(dindex)
+        .bind(account)
+        .execute(&mut *db_tx)
+        .await?;
+
+    // Ensure the transparent receive address for this index is stored.
     let tkeys = select_account_transparent(&mut db_tx, account, dindex).await?;
     let (sk, pk, address) = match tkeys.xvk {
         Some(xvk) => {

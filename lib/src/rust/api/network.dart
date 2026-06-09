@@ -9,7 +9,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'network.freezed.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Usd`, `ZcashUSD`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`
 
 Future<void> initDatadir({required String directory}) =>
@@ -18,8 +17,10 @@ Future<void> initDatadir({required String directory}) =>
 Future<int> getCurrentHeight({required Coin c}) =>
     RustLib.instance.api.crateApiNetworkGetCurrentHeight(c: c);
 
-Future<double> getCoingeckoPrice({required String api}) =>
-    RustLib.instance.api.crateApiNetworkGetCoingeckoPrice(api: api);
+Future<double> getCoingeckoPrice(
+        {required String api, required String currency}) =>
+    RustLib.instance.api
+        .crateApiNetworkGetCoingeckoPrice(api: api, currency: currency);
 
 Future<String> getNetworkName({required Coin c}) =>
     RustLib.instance.api.crateApiNetworkGetNetworkName(c: c);

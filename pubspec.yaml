@@ -99,3 +99,4 @@ flutter:
   assets:
     - misc/icon.png
     - assets/tor.svg
+    - assets/zcash.svg

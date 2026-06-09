@@ -1340,6 +1340,7 @@ mixin _$AppSettings {
   DateTime get pinUnlockedAt;
   bool get offline;
   bool get getFx;
+  String get fxCurrency;
   QRSettings get qrSettings;
   bool get vault;
   bool get expertMode;
@@ -1380,6 +1381,8 @@ mixin _$AppSettings {
                 other.pinUnlockedAt == pinUnlockedAt) &&
             (identical(other.offline, offline) || other.offline == offline) &&
             (identical(other.getFx, getFx) || other.getFx == getFx) &&
+            (identical(other.fxCurrency, fxCurrency) ||
+                other.fxCurrency == fxCurrency) &&
             (identical(other.qrSettings, qrSettings) ||
                 other.qrSettings == qrSettings) &&
             (identical(other.vault, vault) || other.vault == vault) &&
@@ -1409,6 +1412,7 @@ mixin _$AppSettings {
         pinUnlockedAt,
         offline,
         getFx,
+        fxCurrency,
         qrSettings,
         vault,
         expertMode,
@@ -1418,7 +1422,7 @@ mixin _$AppSettings {
 
   @override
   String toString() {
-    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode)';
+    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, fxCurrency: $fxCurrency, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode)';
   }
 }
 
@@ -1444,6 +1448,7 @@ abstract mixin class $AppSettingsCopyWith<$Res> {
       DateTime pinUnlockedAt,
       bool offline,
       bool getFx,
+      String fxCurrency,
       QRSettings qrSettings,
       bool vault,
       bool expertMode,
@@ -1480,6 +1485,7 @@ class _$AppSettingsCopyWithImpl<$Res> implements $AppSettingsCopyWith<$Res> {
     Object? pinUnlockedAt = null,
     Object? offline = null,
     Object? getFx = null,
+    Object? fxCurrency = null,
     Object? qrSettings = null,
     Object? vault = null,
     Object? expertMode = null,
@@ -1547,6 +1553,10 @@ class _$AppSettingsCopyWithImpl<$Res> implements $AppSettingsCopyWith<$Res> {
           ? _self.getFx
           : getFx // ignore: cast_nullable_to_non_nullable
               as bool,
+      fxCurrency: null == fxCurrency
+          ? _self.fxCurrency
+          : fxCurrency // ignore: cast_nullable_to_non_nullable
+              as String,
       qrSettings: null == qrSettings
           ? _self.qrSettings
           : qrSettings // ignore: cast_nullable_to_non_nullable
@@ -1688,6 +1698,7 @@ extension AppSettingsPatterns on AppSettings {
             DateTime pinUnlockedAt,
             bool offline,
             bool getFx,
+            String fxCurrency,
             QRSettings qrSettings,
             bool vault,
             bool expertMode,
@@ -1715,6 +1726,7 @@ extension AppSettingsPatterns on AppSettings {
             _that.pinUnlockedAt,
             _that.offline,
             _that.getFx,
+            _that.fxCurrency,
             _that.qrSettings,
             _that.vault,
             _that.expertMode,
@@ -1756,6 +1768,7 @@ extension AppSettingsPatterns on AppSettings {
             DateTime pinUnlockedAt,
             bool offline,
             bool getFx,
+            String fxCurrency,
             QRSettings qrSettings,
             bool vault,
             bool expertMode,
@@ -1782,6 +1795,7 @@ extension AppSettingsPatterns on AppSettings {
             _that.pinUnlockedAt,
             _that.offline,
             _that.getFx,
+            _that.fxCurrency,
             _that.qrSettings,
             _that.vault,
             _that.expertMode,
@@ -1820,6 +1834,7 @@ extension AppSettingsPatterns on AppSettings {
             DateTime pinUnlockedAt,
             bool offline,
             bool getFx,
+            String fxCurrency,
             QRSettings qrSettings,
             bool vault,
             bool expertMode,
@@ -1846,6 +1861,7 @@ extension AppSettingsPatterns on AppSettings {
             _that.pinUnlockedAt,
             _that.offline,
             _that.getFx,
+            _that.fxCurrency,
             _that.qrSettings,
             _that.vault,
             _that.expertMode,
@@ -1876,6 +1892,7 @@ class _AppSettings implements AppSettings {
       required this.pinUnlockedAt,
       required this.offline,
       required this.getFx,
+      required this.fxCurrency,
       required this.qrSettings,
       required this.vault,
       required this.expertMode,
@@ -1913,6 +1930,8 @@ class _AppSettings implements AppSettings {
   final bool offline;
   @override
   final bool getFx;
+  @override
+  final String fxCurrency;
   @override
   final QRSettings qrSettings;
   @override
@@ -1959,6 +1978,8 @@ class _AppSettings implements AppSettings {
                 other.pinUnlockedAt == pinUnlockedAt) &&
             (identical(other.offline, offline) || other.offline == offline) &&
             (identical(other.getFx, getFx) || other.getFx == getFx) &&
+            (identical(other.fxCurrency, fxCurrency) ||
+                other.fxCurrency == fxCurrency) &&
             (identical(other.qrSettings, qrSettings) ||
                 other.qrSettings == qrSettings) &&
             (identical(other.vault, vault) || other.vault == vault) &&
@@ -1988,6 +2009,7 @@ class _AppSettings implements AppSettings {
         pinUnlockedAt,
         offline,
         getFx,
+        fxCurrency,
         qrSettings,
         vault,
         expertMode,
@@ -1997,7 +2019,7 @@ class _AppSettings implements AppSettings {
 
   @override
   String toString() {
-    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode)';
+    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, fxCurrency: $fxCurrency, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode)';
   }
 }
 
@@ -2025,6 +2047,7 @@ abstract mixin class _$AppSettingsCopyWith<$Res>
       DateTime pinUnlockedAt,
       bool offline,
       bool getFx,
+      String fxCurrency,
       QRSettings qrSettings,
       bool vault,
       bool expertMode,
@@ -2062,6 +2085,7 @@ class __$AppSettingsCopyWithImpl<$Res> implements _$AppSettingsCopyWith<$Res> {
     Object? pinUnlockedAt = null,
     Object? offline = null,
     Object? getFx = null,
+    Object? fxCurrency = null,
     Object? qrSettings = null,
     Object? vault = null,
     Object? expertMode = null,
@@ -2129,6 +2153,10 @@ class __$AppSettingsCopyWithImpl<$Res> implements _$AppSettingsCopyWith<$Res> {
           ? _self.getFx
           : getFx // ignore: cast_nullable_to_non_nullable
               as bool,
+      fxCurrency: null == fxCurrency
+          ? _self.fxCurrency
+          : fxCurrency // ignore: cast_nullable_to_non_nullable
+              as String,
       qrSettings: null == qrSettings
           ? _self.qrSettings
           : qrSettings // ignore: cast_nullable_to_non_nullable
