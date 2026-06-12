@@ -23,7 +23,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:local_auth/error_codes.dart' as auth_error;
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zkool/prefs.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:password_strength_checker/password_strength_checker.dart';
@@ -185,10 +185,39 @@ Uint8List stringToTxId(String txid) {
   return Uint8List.fromList(bytes.reversed.toList());
 }
 
+/// True when running as the portable build (executable named `zkool_portable`).
+/// In portable mode all data lives in a `./db` directory next to the exe.
+bool get isPortable {
+  final exe = Platform.resolvedExecutable;
+  final base = exe.split(Platform.pathSeparator).last.toLowerCase();
+  return base.startsWith('zkool_portable');
+}
+
+/// Single source of truth for where the app stores its data.
+/// Portable build -> `<exe dir>/db`; otherwise the OS documents directory.
+Future<Directory> getDataDirectory() async {
+  if (isPortable) {
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final dir = Directory('$exeDir${Platform.pathSeparator}db');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+  return getApplicationDocumentsDirectory();
+}
+
+/// Joins [dir] and [name] using the platform separator and normalizes any
+/// mixed slashes so Windows paths render consistently (e.g.
+/// `C:\Users\User\Documents\zkool.db` instead of `...Documents/zkool.db`).
+String joinPath(String dir, String name) {
+  final sep = Platform.pathSeparator;
+  var path = '$dir$sep$name';
+  if (Platform.isWindows) path = path.replaceAll('/', sep);
+  return path;
+}
+
 Future<String> getFullDatabasePath(String dbName) async {
-  final dbDir = await getApplicationDocumentsDirectory();
-  final dbFilepath = '${dbDir.path}/$dbName.db';
-  return dbFilepath;
+  final dbDir = await getDataDirectory();
+  return joinPath(dbDir.path, '$dbName.db');
 }
 
 Future<AwesomeDialog> showMessage(BuildContext context, String message, {String? title, bool dismissable = true}) async {
@@ -376,7 +405,8 @@ Future<T?> inputData<T>(
 }
 
 Future<void> resetTutorial(BuildContext context) async {
-  final prefs = SharedPreferencesAsync();
+  final prefs = AppPrefs();
+  await prefs.setBool("tutReset", true);
   await prefs.remove("tutMain0");
   await prefs.remove("tutMain1");
   await prefs.remove("tutNew0");
@@ -395,8 +425,8 @@ Future<void> resetTutorial(BuildContext context) async {
 }
 
 void tutorialHelper(BuildContext context, String id, List<GlobalKey<State<StatefulWidget>>> ids) async {
-  final prefs = SharedPreferencesAsync();
-  final tutNew = await prefs.getBool(id) ?? true;
+  final prefs = AppPrefs();
+  final tutNew = await prefs.getBool(id) ?? await prefs.getBool("tutReset") ?? false;
   if (tutNew) {
     if (!context.mounted) return;
     final scw = ShowCaseWidget.of(context);

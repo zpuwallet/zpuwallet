@@ -303,7 +303,7 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
                               ),
                             ),
                           ),
-                          ...showTxHistory(context, account.transactions),
+                          ...showTxHistory(context, account.transactions, currentHeight: ref.watch(currentHeightProvider)),
                         ],
                       ),
                       showMemos(context, account.memos),
@@ -835,7 +835,7 @@ class BalanceWidget extends StatelessWidget {
   }
 }
 
-List<Widget> showTxHistory(BuildContext context, List<Tx> transactions) {
+List<Widget> showTxHistory(BuildContext context, List<Tx> transactions, {int? currentHeight}) {
   final t = Theme.of(context).textTheme;
   return [
     SliverToBoxAdapter(
@@ -853,6 +853,11 @@ List<Widget> showTxHistory(BuildContext context, List<Tx> transactions) {
       itemBuilder: (context, index) {
         final tx = transactions[index];
         final (color, icon, label) = getTransactionType(tx.tpe);
+        // Confirmations = blocks mined on top of (and including) the tx block.
+        // Only shown for mined txs (height > 0) once the current height is known.
+        final int? confirmations = (currentHeight != null && tx.height > 0)
+            ? (currentHeight - tx.height + 1).clamp(0, 1 << 30)
+            : null;
         final tile = TransactionTile(
           icon: icon,
           color: color,
@@ -863,6 +868,7 @@ List<Widget> showTxHistory(BuildContext context, List<Tx> transactions) {
           onTap: () => gotoTransaction(context, tx.id),
           zsaValue: tx.zsaValue != 0 ? BigInt.from(tx.zsaValue) : null,
           zsaLabel: tx.zsaValue != 0 ? tx.assetDisplay : null,
+          confirmations: confirmations,
         );
 
         return Column(children: [

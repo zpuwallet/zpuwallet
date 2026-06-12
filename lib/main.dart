@@ -2,10 +2,9 @@ import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:toastification/toastification.dart';
+import 'package:zkool/prefs.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/network.dart';
 import 'package:zkool/src/rust/frb_generated.dart';
@@ -22,9 +21,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await RustLib.init();
-  final dataDir = await getApplicationDocumentsDirectory();
+  final dataDir = await getDataDirectory();
   await initDatadir(directory: dataDir.path);
-  final prefs = SharedPreferencesAsync();
+  await AppPrefs().init();
+  final prefs = AppPrefs();
   final recovery = await prefs.getBool("recovery") ?? false;
   final disclaimerAccepted = await prefs.getBool("disclaimer_accepted") ?? false;
 
