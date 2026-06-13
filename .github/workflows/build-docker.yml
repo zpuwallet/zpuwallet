@@ -12,7 +12,44 @@ env:
   REGISTRY_IMAGE: hhanh00/zkool-graphql
 
 jobs:
+  # Decide where to publish: Docker Hub when DOCKERHUB_TOKEN is configured,
+  # otherwise fall back to the GitHub Container Registry using GITHUB_TOKEN.
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      use_dockerhub: ${{ steps.r.outputs.use_dockerhub }}
+      registry: ${{ steps.r.outputs.registry }}
+      image: ${{ steps.r.outputs.image }}
+      username: ${{ steps.r.outputs.username }}
+    steps:
+      - name: Select registry
+        id: r
+        shell: bash
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "::notice::Publishing to Docker Hub (${REGISTRY_IMAGE})"
+            echo "use_dockerhub=true" >> "$GITHUB_OUTPUT"
+            echo "registry=docker.io" >> "$GITHUB_OUTPUT"
+            echo "image=${REGISTRY_IMAGE}" >> "$GITHUB_OUTPUT"
+            echo "username=${DOCKER_USERNAME}" >> "$GITHUB_OUTPUT"
+          else
+            owner=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+            echo "::warning::DOCKERHUB_TOKEN not set: publishing to ghcr.io/${owner}/zkool-graphql"
+            echo "use_dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "registry=ghcr.io" >> "$GITHUB_OUTPUT"
+            echo "image=ghcr.io/${owner}/zkool-graphql" >> "$GITHUB_OUTPUT"
+            echo "username=${ACTOR}" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: config
+    permissions:
+      contents: read
+      packages: write   # push to GHCR when falling back
     strategy:
       fail-fast: false
       matrix:
@@ -33,17 +70,18 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY_IMAGE }}
-      - name: Login to Docker Hub
+          images: ${{ needs.config.outputs.image }}
+      - name: Login to registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ needs.config.outputs.registry }}
+          username: ${{ needs.config.outputs.username }}
+          password: ${{ needs.config.outputs.use_dockerhub == 'true' && secrets.DOCKERHUB_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
+      # No QEMU: each matrix entry builds on a native runner (amd64 on
+      # ubuntu-latest, arm64 on ubuntu-24.04-arm), so no emulation is needed.
+      # This also avoids pulling tonistiigi/binfmt from Docker Hub.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -52,7 +90,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           file: misc/alpine.dockerfile
-          tags: ${{ env.REGISTRY_IMAGE }}
+          tags: ${{ needs.config.outputs.image }}
           labels: ${{ steps.meta.outputs.labels }}
           # push: ${{ env.TAGGED == 'true' }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
@@ -72,7 +110,11 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     needs:
+      - config
       - build
+    permissions:
+      contents: read
+      packages: write   # push to GHCR when falling back
     steps:
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -81,11 +123,12 @@ jobs:
           pattern: digests-*
           merge-multiple: true
 
-      - name: Login to Docker Hub
+      - name: Login to registry
         uses: docker/login-action@v4
         with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ needs.config.outputs.registry }}
+          username: ${{ needs.config.outputs.username }}
+          password: ${{ needs.config.outputs.use_dockerhub == 'true' && secrets.DOCKERHUB_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -94,15 +137,15 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY_IMAGE }}
+          images: ${{ needs.config.outputs.image }}
           tags: type=semver,pattern={{version}},match=v(\d+.\d+.\d+(-rc.\d+)?)$
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+            $(printf '${{ needs.config.outputs.image }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ needs.config.outputs.image }}:${{ steps.meta.outputs.version }}
