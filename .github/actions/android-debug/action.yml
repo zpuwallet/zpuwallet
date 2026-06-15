@@ -1,0 +1,56 @@
+name: "Build Android (unsigned/debug)"
+description: >-
+  Build an Android APK without the release keystore. Patches
+  android/app/build.gradle so the release build type is signed with the
+  auto-generated debug key, producing an installable but unsigned artifact.
+inputs:
+  version:
+    description: release version
+    required: true
+outputs:
+  outdir:
+    value: ${{ steps.out.outputs.outdir }}
+runs:
+  using: "composite"
+  steps:
+    - name: Patch build.gradle for debug signing
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import re, sys
+        path = "android/app/build.gradle"
+        src = open(path).read()
+        # The committed release signingConfig loads android/key.properties at
+        # configuration time and throws when it is absent. Drop that block and
+        # sign the release build type with the auto-generated debug key instead.
+        patched, n = re.subn(r"\n    signingConfigs \{.*?\n    \}\n", "\n", src, flags=re.DOTALL)
+        patched = patched.replace("signingConfig signingConfigs.release",
+                                  "signingConfig signingConfigs.debug")
+        if n != 1 or "signingConfig signingConfigs.debug" not in patched:
+            sys.exit("Failed to patch build.gradle for debug signing; aborting")
+        open(path, "w").write(patched)
+        print(patched)
+        PY
+    - name: Build
+      shell: bash
+      run: |
+        echo "Building unsigned (debug-signed) zkool version: ${RELEASE_VERSION}"
+        flutter build apk --split-per-abi --target-platform android-arm64,android-x64
+      env:
+        RELEASE_VERSION: ${{ inputs.version }}
+        CARGO_ENCODED_RUSTFLAGS: "--cfg\u001fzcash_unstable=\"nu7\""
+    - name: Move to outdir
+      id: out
+      shell: bash
+      run: |
+        mkdir out
+        find . -path ./out -prune -o -type f -name "*.apk" -exec sh -c '
+          f="$1"
+          base=$(basename "$f")
+          newf=$(echo "$base" | sed "s/app/$NAME/g")
+          mv "$f" "out/${newf}"
+        ' sh {} \;
+        ls -l out
+        echo "outdir=out" >> $GITHUB_OUTPUT
+      env:
+        NAME: zkool-${{ inputs.version }}-unsigned

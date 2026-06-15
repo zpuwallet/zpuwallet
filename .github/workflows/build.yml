@@ -32,31 +32,71 @@ jobs:
     env:
       FLUTTER_VERSION: 3.44.2
       RUSTFLAGS: '--cfg zcash_unstable="nu7"'
-    permissions:
-      id-token: write
-      attestations: write
-      contents: write
 
     steps:
+      - name: Check signing secrets
+        id: gate
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          JKS_PASSWORD: ${{ secrets.JKS_PASSWORD }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+          MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
+          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+        run: |
+          # Linux/Windows need no secrets. Android falls back to an unsigned
+          # (debug-signed) APK when JKS_PASSWORD is absent. Mac has no usable
+          # fallback and is skipped when its signing/notarization secrets are missing.
+          case "$TARGET" in
+            mac) required="JKS_PASSWORD IOS_CERTIFICATE_PASSWORD MACOS_CERTIFICATE_PWD MACOS_CERTIFICATE_NAME MACOS_NOTARIZATION_APPLE_ID MACOS_NOTARIZATION_PWD MACOS_NOTARIZATION_TEAM_ID" ;;
+            *)   required="" ;;
+          esac
+          build=true
+          missing=""
+          for v in $required; do
+            eval "val=\${$v}"
+            if [ -z "$val" ]; then build=false; missing="$missing $v"; fi
+          done
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+          android_signed=true
+          if [ "$TARGET" = "android" ] && [ -z "$JKS_PASSWORD" ]; then
+            android_signed=false
+            echo "::warning::JKS_PASSWORD not set: building unsigned (debug-signed) Android APK"
+          fi
+          echo "android_signed=$android_signed" >> "$GITHUB_OUTPUT"
+
+          if [ "$build" != "true" ]; then
+            echo "::warning::Skipping $TARGET build: missing signing secrets:$missing"
+          fi
       - name: Install RUST
+        if: ${{ steps.gate.outputs.build == 'true' }}
         uses: dtolnay/rust-toolchain@stable
       - name: Install PYTHON
+        if: ${{ steps.gate.outputs.build == 'true' }}
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Checkout code
+        if: ${{ steps.gate.outputs.build == 'true' }}
         uses: actions/checkout@v6
       - name: Set up Flutter
+        if: ${{ steps.gate.outputs.build == 'true' }}
         shell: bash
         run: |
           git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git $RUNNER_TEMP/flutter
           echo "$RUNNER_TEMP/flutter/bin" >> $GITHUB_PATH
-      - run: |
+      - if: ${{ steps.gate.outputs.build == 'true' }}
+        run: |
           flutter --version
           flutter precache
         shell: bash
       - name: Get version number
         id: version
+        if: ${{ steps.gate.outputs.build == 'true' }}
         shell: bash
         run: |
           SEMVER=$(sed -n 's/^version: *\([^ ]*\).*/\1/p' pubspec.yaml)
@@ -66,14 +106,20 @@ jobs:
           echo "result=$RELEASE_VERSION" >> $GITHUB_OUTPUT
       - name: Build Android
         id: build_android
-        if: ${{ matrix.target == 'android' && github.event_name != 'pull_request' }}
+        if: ${{ steps.gate.outputs.build == 'true' && steps.gate.outputs.android_signed == 'true' && matrix.target == 'android' && github.event_name != 'pull_request' }}
         uses: ./.github/actions/android
         with:
           version: ${{ steps.version.outputs.result }}
           jks: ${{ secrets.JKS_PASSWORD }}
+      - name: Build Android (debug)
+        id: build_android_debug
+        if: ${{ steps.gate.outputs.build == 'true' && steps.gate.outputs.android_signed != 'true' && matrix.target == 'android' && github.event_name != 'pull_request' }}
+        uses: ./.github/actions/android-debug
+        with:
+          version: ${{ steps.version.outputs.result }}
       - name: Build Linux
         id: build_linux
-        if: ${{ matrix.target == 'linux' }}
+        if: ${{ steps.gate.outputs.build == 'true' && matrix.target == 'linux' }}
         uses: ./.github/actions/linux
         with:
           version: ${{ steps.version.outputs.result }}
@@ -81,7 +127,7 @@ jobs:
           arch: ${{ matrix.arch }}
       - name: Build Mac
         id: build_mac
-        if: ${{ matrix.target == 'mac' && github.event_name != 'pull_request' }}
+        if: ${{ steps.gate.outputs.build == 'true' && matrix.target == 'mac' && github.event_name != 'pull_request' }}
         uses: ./.github/actions/mac
         with:
           version: ${{ steps.version.outputs.result }}
@@ -94,26 +140,104 @@ jobs:
           apple_team_id: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
       - name: Build Windows
         id: build_windows
-        if: ${{ matrix.target == 'windows' && github.event_name != 'pull_request' }}
+        if: ${{ steps.gate.outputs.build == 'true' && matrix.target == 'windows' && github.event_name != 'pull_request' }}
         uses: ./.github/actions/windows
         with:
           version: ${{ steps.version.outputs.result }}
       - name: Collect output dir
         id: collect
+        if: ${{ steps.gate.outputs.build == 'true' }}
         shell: bash
         run: |
           df -h
-          echo "outdir=${{ steps.build_android.outputs.outdir || steps.build_linux.outputs.outdir || steps.build_mac.outputs.outdir || steps.build_windows.outputs.outdir }}" >> $GITHUB_OUTPUT
-      - name: Attest build provenance
-        if: startsWith(github.ref_name, 'zkool-v')
-        uses: actions/attest@v4
+          echo "outdir=${{ steps.build_android.outputs.outdir || steps.build_android_debug.outputs.outdir || steps.build_linux.outputs.outdir || steps.build_mac.outputs.outdir || steps.build_windows.outputs.outdir }}" >> $GITHUB_OUTPUT
+      - name: Upload build artifacts
+        if: ${{ steps.gate.outputs.build == 'true' && startsWith(github.ref_name, 'zkool-v') }}
+        uses: actions/upload-artifact@v7
         with:
-          subject-path: ${{ steps.collect.outputs.outdir }}/*
-      - name: Create Release
-        if: startsWith(github.ref_name, 'zkool-v')
+          name: dist-${{ matrix.target }}-${{ matrix.arch }}
+          path: ${{ steps.collect.outputs.outdir }}/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref_name, 'zkool-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # edit release / upload assets
+      id-token: write       # sigstore OIDC for attestation
+      attestations: write   # write attestation to GitHub
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          NAME=$(sed -n 's/^name: *\([^ ]*\).*/\1/p' pubspec.yaml)
+          SEMVER=$(sed -n 's/^version: *\([^ ]*\).*/\1/p' pubspec.yaml)
+          BUILD=$(cat build_number.txt)
+          echo "distname=${NAME}-${SEMVER}+${BUILD}" >> $GITHUB_OUTPUT
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Stage attestation bundle
+        shell: bash
+        run: cp "${{ steps.attest.outputs.bundle-path }}" "dist/${{ steps.version.outputs.distname }}.intoto.jsonl"
+      - name: Upload assets to release
         uses: softprops/action-gh-release@v3
         with:
-          files: ${{ steps.collect.outputs.outdir }}/*
+          files: dist/*
           draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Append attestation notes
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          DISTNAME: ${{ steps.version.outputs.distname }}
+        run: |
+          CHECKSUMS=$(cat dist/SHA256SUMS)
+          BODY=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+          gh release edit "$TAG" --repo "$REPO" --notes "$(cat <<EOF
+          $BODY
+
+          ### Attestations
+
+          Each released binary carries a signed GitHub build-provenance attestation.
+          To verify a file you downloaded using [Github CLI](https://cli.github.com):
+
+          \`\`\`sh
+          # Verify against the attestations stored on GitHub (needs network):
+          gh attestation verify <file> --repo $REPO
+
+          # Or verify fully offline using the bundle attached to this release:
+          gh attestation verify <file> --bundle $DISTNAME.intoto.jsonl
+          \`\`\`
+
+          \`SHA256SUMS\` lists the digest of every artifact; check a downloaded
+          file against it to confirm integrity.
+
+          ### Checksums
+
+          \`\`\`
+          $CHECKSUMS
+          \`\`\`
+          EOF
+          )"
