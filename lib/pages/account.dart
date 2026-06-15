@@ -16,6 +16,7 @@ import 'package:easy_debounce/easy_debounce.dart';
 import 'package:searchable_listview/searchable_listview.dart';
 
 import 'package:zkool/main.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/pages/tx.dart';
 import 'package:zkool/pages/zsa.dart';
 import 'package:zkool/router.dart';
@@ -153,7 +154,10 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
     if (pinlock.value ?? false) return PinLock();
 
     final selectedAccountAV = ref.watch(selectedAccountProvider);
-    ref.watch(appSettingsProvider); // rebuild when settings change (e.g. list/table toggle)
+    // Rebuild when settings change (e.g. list/table toggle) and read the active
+    // network so the title can show a " ( testnet )" / " ( regtest )" suffix.
+    final settingsAV = ref.watch(appSettingsProvider);
+    final netSuffix = networkSuffix(networkForName(settingsAV.value?.net ?? "mainnet"));
     return selectedAccountAV.when(
       loading: () => blank(context),
       error: (error, stack) => showError(error),
@@ -169,7 +173,12 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(fullDataAV.value?.currentAccount?.account.name ?? "Loading"),
+            leading: IconButton(
+              tooltip: "Account list",
+              icon: Icon(Icons.list),
+              onPressed: () => GoRouter.of(context).go("/accounts"),
+            ),
+            title: Text("${fullDataAV.value?.currentAccount?.account.name ?? "Loading"}$netSuffix"),
             actions: [
               Tooltip(
                 message: "Synchronize only this account",
@@ -194,6 +203,8 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
                   switch (result) {
                     case "account_manager":
                       GoRouter.of(context).push("/accounts");
+                    case "network":
+                      GoRouter.of(context).push("/networks");
                     case "backup":
                       final account = fullDataAV.value?.currentAccount?.account;
                       if (account != null) {
@@ -224,6 +235,10 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
                   const PopupMenuItem<String>(
                     value: "account_manager",
                     child: Text("Account Manager"),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: "network",
+                    child: Text("Network"),
                   ),
                   const PopupMenuItem<String>(
                     value: "settings",
@@ -389,6 +404,7 @@ class AccountViewPageState extends ConsumerState<AccountViewPage> with SingleTic
                                     child: showTxHistory(
                                       context,
                                       _filterTx(account.transactions),
+                                      currentHeight: ref.watch(currentHeightProvider).value,
                                     ),
                                   ),
                                 ),
@@ -916,13 +932,18 @@ class BalanceWidget extends StatelessWidget {
   }
 }
 
-Widget showTxHistory(BuildContext context, List<Tx> transactions) {
+Widget showTxHistory(BuildContext context, List<Tx> transactions, {int? currentHeight}) {
   return ListView.builder(
     itemExtent: 65,
     itemCount: transactions.length,
     itemBuilder: (context, index) {
       final tx = transactions[index];
       final (color, icon, label) = getTransactionType(tx.tpe);
+      // Confirmations = blocks mined on top of (and including) the tx block.
+      // Only shown for mined txs (height > 0) once the current height is known.
+      final int? confirmations = (currentHeight != null && tx.height > 0)
+          ? (currentHeight - tx.height + 1).clamp(0, 1 << 30)
+          : null;
       final tile = TransactionTile(
         icon: icon,
         color: color,
@@ -934,6 +955,7 @@ Widget showTxHistory(BuildContext context, List<Tx> transactions) {
         zsaValue: tx.zsaValue != 0 ? BigInt.from(tx.zsaValue) : null,
         zsaLabel: tx.zsaValue != 0 ? tx.assetDisplay : null,
         contactName: tx.contactName,
+        confirmations: confirmations,
       );
       return Column(children: [
         SizedBox(height: 64, child: tile),

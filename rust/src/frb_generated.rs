@@ -1077,6 +1077,7 @@ fn wire__crate__api__coin__coin_open_database_impl(
             let api_that = <crate::api::coin::Coin>::sse_decode(&mut deserializer);
             let api_db_filepath = <String>::sse_decode(&mut deserializer);
             let api_password = <Option<String>>::sse_decode(&mut deserializer);
+            let api_coin = <Option<u8>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1085,6 +1086,7 @@ fn wire__crate__api__coin__coin_open_database_impl(
                             api_that,
                             api_db_filepath,
                             api_password,
+                            api_coin,
                         )
                         .await?;
                         Ok(output_ok)

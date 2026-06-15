@@ -8,6 +8,7 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:zkool/main.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/pages/account.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/account.dart';
@@ -83,24 +84,37 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
 
         final visibleAccounts = pageData.accounts.where((a) => !a.internal).toList();
         if (visibleAccounts.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.account_balance_wallet_outlined, size: 64, color: tt.bodySmall?.color),
-                  const Gap(16),
-                  Text("No accounts yet", style: tt.titleLarge),
-                  const Gap(8),
-                  Text("Tap the + button to create your first account", style: tt.bodyMedium),
-                  const Gap(24),
-                  ElevatedButton.icon(
-                    onPressed: () => GoRouter.of(context).push("/account/new"),
-                    icon: const Icon(Icons.add),
-                    label: const Text("New Account"),
-                  ),
-                ],
+          // The EditableList (with its AppBar + Switch Network button) is not
+          // built in the empty state, so provide a matching Scaffold/AppBar here
+          // so the user can still switch networks before creating an account.
+          return Scaffold(
+            appBar: AppBar(
+              centerTitle: false,
+              title: Text(networkTitle(appName, networkForName(pageData.settings.net))),
+              actions: [
+                IconButton(onPressed: onSwitchNetwork, tooltip: "Switch the active network (Mainnet / Testnet / Regtest)", icon: Icon(Icons.public)),
+                IconButton(onPressed: onSettings, tooltip: "Open Settings", icon: Icon(Icons.settings)),
+              ],
+            ),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.account_balance_wallet_outlined, size: 64, color: tt.bodySmall?.color),
+                    const Gap(16),
+                    Text("No accounts yet", style: tt.titleLarge),
+                    const Gap(8),
+                    Text("Tap the + button to create your first account", style: tt.bodyMedium),
+                    const Gap(24),
+                    ElevatedButton.icon(
+                      onPressed: () => GoRouter.of(context).push("/account/new"),
+                      icon: const Icon(Icons.add),
+                      label: const Text("New Account"),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -151,13 +165,14 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
                         height: SmallProgressWidget(account, style: tt.labelSmall),
                       ),
                       onTap: () => onOpen(context, account),
+                      onLongPressStart: (details) => onSelectChanged?.call(!(selected ?? false)),
                     ),
                     const Divider(height: 1, indent: 72),
                   ],
                 ),
               );
             },
-            title: "Account List",
+            title: networkTitle(appName, networkForName(pageData.settings.net)),
             createBuilder: (context) => GoRouter.of(context).push("/account/new"),
             editBuilder: (context, a) => GoRouter.of(context).push("/account/edit", extra: a),
             deleteBuilder: (context, accounts) async {
@@ -172,6 +187,7 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
             isEqual: (a, b) => a.id == b.id,
             onReorder: onReorder,
             buttons: [
+              IconButton(onPressed: onSwitchNetwork, tooltip: "Switch the active network (Mainnet / Testnet / Regtest)", icon: Icon(Icons.public)),
               IconButton(onPressed: onSettings, tooltip: "Open Settings", icon: Icon(Icons.settings)),
               IconButton(onPressed: onSync, tooltip: "Synchronize all enabled accounts or the accounts currently selected", icon: Icon(Icons.sync)),
               PopupMenuButton<String>(
@@ -294,6 +310,10 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
 
   void onSettings() async {
     await GoRouter.of(context).push('/settings');
+  }
+
+  void onSwitchNetwork() async {
+    await GoRouter.of(context).push('/networks');
   }
 
   void onPrice() {

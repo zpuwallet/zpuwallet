@@ -7,10 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:toastification/toastification.dart';
 import 'package:flutter/material.dart';
 import 'package:zkool/main.dart';
+import 'package:zkool/prefs.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/account.dart';
 import 'package:zkool/src/rust/api/coin.dart';
@@ -87,12 +88,18 @@ class SyncStateAccount extends _$SyncStateAccount {
     final account = accounts.firstWhere((a) => a.id == accountId);
     final ss = ref.watch(synchronizerProvider);
     if (ss.accounts.any((a) => a.id == account.id)) {
+      // Account is part of the active sync: drive the displayed height from the
+      // live synchronizer progress (ss.height) so the card climbs toward the
+      // chain tip in real time, instead of staying frozen at account.height
+      // (which is only refreshed from the DB after the whole sync completes).
+      // Use the account's stored height as the sync start so the progress bar
+      // renders correctly.
       return SyncProgressAccount(
         account: account,
-        start: max(ss.start, account.height),
+        start: account.height,
         end: ss.end,
         height: max(ss.height, account.height),
-        time: max(ss.time, account.time),
+        time: ss.time != 0 ? ss.time : account.time,
       );
     } else {
       return SyncProgressAccount(
@@ -152,7 +159,11 @@ class ProgressWidget extends ConsumerWidget {
     final t = Theme.of(context);
     final timestamp = DateTime.fromMillisecondsSinceEpoch(ss.time * 1000);
     final syncAge = DateTime.now().difference(timestamp);
-    final old = syncAge > Duration(minutes: 30);
+    // On regtest blocks are mined manually, so the latest block timestamp is
+    // almost always "old" — the staleness heuristic is meaningless there and
+    // would paint the height red. Only flag staleness on main/testnet.
+    final net = networkForName(ref.watch(appSettingsProvider).value?.net ?? "mainnet");
+    final old = net != ZNetwork.regtest && syncAge > Duration(minutes: 30);
     final s = style ?? TextStyle();
     final s2 = old ? s.copyWith(color: Colors.red) : s;
 
@@ -343,21 +354,21 @@ class AppSettingsNotifier extends _$AppSettingsNotifier {
   Future<AppSettings> build() async {
     final c = coinContext.coin;
     final hasDb = ref.watch(hasDbProvider);
-    final prefs = SharedPreferencesAsync();
+    final prefs = AppPrefs();
     String dbName = await prefs.getString("database") ?? appName;
     final needPin = await prefs.getBool("pin_lock") ?? false;
     final offline = await prefs.getBool("offline") ?? false;
     final useTor = await prefs.getBool("use_tor") ?? false;
     final proxy = (hasDb ? await getProp(key: "proxy", c: c) : null) ?? "";
-    final getFx = await prefs.getBool("get_fx") ?? false;
+    final getFx = await prefs.getBool("get_fx") ?? true;
     final coingecko = await prefs.getString("coingecko") ?? "";
     final recovery = await prefs.getBool("recovery") ?? false;
     final net = (hasDb ? await getNetworkName(c: c) : null) ?? "mainnet";
     final isLightNode = (hasDb ? await getProp(key: "is_light_node", c: c) : null) ?? "true";
     final lwd = (hasDb ? await getProp(key: "lwd", c: c) : null) ?? "https://zec.rocks";
-    final syncInterval = (hasDb ? await getProp(key: "sync_interval", c: c) : null) ?? "30";
+    final syncInterval = (hasDb ? await getProp(key: "sync_interval", c: c) : null) ?? "1";
     final actionsPerSync = (hasDb ? await getProp(key: "actions_per_sync", c: c) : null) ?? "10000";
-    final blockExplorer = (hasDb ? await getProp(key: "block_explorer", c: c) : null) ?? "https://{net}.zcashexplorer.app/transactions/{txid}";
+    final blockExplorer = (hasDb ? await getProp(key: "block_explorer", c: c) : null) ?? "https://cipherscan.app/tx/{txid}";
     final qrEnabled = (hasDb ? await getProp(key: "qr_enabled", c: c) : null) ?? "false";
     final qrSize = (hasDb ? await getProp(key: "qr_size", c: c) : null) ?? "20";
     final qrEC = (hasDb ? await getProp(key: "qr_ecLevel", c: c) : null) ?? "1";
@@ -412,7 +423,7 @@ class AppSettingsNotifier extends _$AppSettingsNotifier {
   }
 
   Future<void> setTheme(String paletteName, bool darkMode) async {
-    final prefs = SharedPreferencesAsync();
+    final prefs = AppPrefs();
     await prefs.setString("palette_name", paletteName);
     await prefs.setBool("dark_mode", darkMode);
     state = state.whenData((s) => s.copyWith(
@@ -422,7 +433,7 @@ class AppSettingsNotifier extends _$AppSettingsNotifier {
   }
 
   Future<void> setTransactionViewMode(bool tableMode) async {
-    final prefs = SharedPreferencesAsync();
+    final prefs = AppPrefs();
     await prefs.setBool("tx_table_mode", tableMode);
     state = state.whenData((s) => s.copyWith(
           transactionTableMode: tableMode,
@@ -803,6 +814,21 @@ class SynchronizerNotifier extends _$SynchronizerNotifier {
     }
   }
 
+  /// Tear down any in-flight synchronization. Used when switching networks so
+  /// no sync stream keeps writing to the previous network's database pool.
+  Future<void> stop() async {
+    try {
+      await cancelSync();
+    } catch (_) {
+      // best-effort; the underlying stream may already be torn down
+    }
+    await syncProgressSubscription?.cancel();
+    syncProgressSubscription = null;
+    syncInProgress = false;
+    retryCount = 0;
+    end();
+  }
+
   void autoSync({bool now = false}) async {
     final settings = await ref.read(appSettingsProvider.future);
     final interval = int.tryParse(settings.syncInterval) ?? 0;
@@ -844,7 +870,7 @@ class SynchronizerNotifier extends _$SynchronizerNotifier {
 
 @Riverpod(keepAlive: true)
 class TransparentScan extends _$TransparentScan {
-  int gapLimit = 40;
+  int gapLimit = 20;
   StreamSubscription? progressSubscription;
   TransparentScanner? scanner;
 
@@ -1122,4 +1148,131 @@ class VaultNotifier extends _$VaultNotifier {
       await vault.storeAccount(name: name, seed: seed, aindex: aindex, useInternal: useInternal, birthHeight: birthHeight, pk: pk);
     });
   }
+}
+
+/// Seed a freshly-created network database's `props` with sensible per-network
+/// defaults (LWD server, light-node flag, block explorer) when they are absent.
+/// Existing databases keep whatever the user has already configured.
+Future<void> _seedNetworkDefaults(Coin c, ZNetwork net) async {
+  final info = networkInfo(net);
+  final lwd = await getProp(key: "lwd", c: c);
+  if (lwd == null || lwd.isEmpty) {
+    await putProp(key: "lwd", value: info.defaultLwd, c: c);
+  }
+  final isLight = await getProp(key: "is_light_node", c: c);
+  if (isLight == null || isLight.isEmpty) {
+    await putProp(key: "is_light_node", value: info.defaultIsLightNode.toString(), c: c);
+  }
+  if (info.defaultExplorer.isNotEmpty) {
+    final explorer = await getProp(key: "block_explorer", c: c);
+    if (explorer == null || explorer.isEmpty) {
+      await putProp(key: "block_explorer", value: info.defaultExplorer, c: c);
+    }
+  }
+}
+
+/// Open [dbFilepath] (prompting for a password via [askPassword] on failure),
+/// seed defaults for [net], wire the LWD/Tor/proxy from the now per-DB settings,
+/// and publish the resulting [Coin] to [coinContext]. Returns the opened Coin.
+///
+/// Shared by the splash open-flow and live network switching so both behave
+/// identically. [askPassword] returns null to abort (e.g. user cancelled).
+Future<Coin?> openAndWireDatabase(
+  WidgetRef ref, {
+  required String dbFilepath,
+  required ZNetwork net,
+  String? password,
+  required Future<String?> Function() askPassword,
+}) async {
+  var c = coinContext.coin;
+  while (true) {
+    try {
+      c = await c.openDatabase(dbFilepath: dbFilepath, password: password, coin: net.coin);
+      break;
+    } catch (e) {
+      logger.e(e);
+      final pw = await askPassword();
+      if (pw == null) return null;
+      password = pw;
+    }
+  }
+  coinContext.set(coin: c);
+  // First-open seeding must happen before settings are read so the defaults
+  // are visible to appSettingsProvider.
+  await _seedNetworkDefaults(c, net);
+
+  // hasDb gates appSettingsProvider's per-DB prop reads.
+  ref.read(hasDbProvider.notifier).setHasDb();
+  ref.invalidate(appSettingsProvider);
+  final settings = await ref.read(appSettingsProvider.future);
+
+  c = c.setLwd(serverType: settings.isLightNode ? 0 : 1, url: settings.lwd);
+  c = await c.setUseTor(useTor: settings.useTor);
+  c = c.setProxy(proxy: settings.proxy);
+  coinContext.set(coin: c);
+  return c;
+}
+
+/// Switch the active network to [net] without restarting the app.
+///
+/// Tears down the current sync/mempool activity, opens the network's dedicated
+/// database (derived from the current DB family base name), rewires the coin
+/// context and persisted selection, invalidates all network-scoped providers,
+/// then restarts auto-sync and the mempool listener.
+///
+/// [askPassword] is invoked if the target database is password-protected.
+/// Returns true on success, false if aborted (e.g. password cancelled).
+Future<bool> switchNetwork(
+  WidgetRef ref,
+  ZNetwork net, {
+  required Future<String?> Function() askPassword,
+}) async {
+  final prefs = AppPrefs();
+  final currentDbName = await prefs.getString("database") ?? appName;
+  final targetDbName = dbNameForNetwork(currentDbName, net);
+  final dbFilepath = await getFullDatabasePath(targetDbName);
+
+  // 1. Tear down activity tied to the current database.
+  await ref.read(synchronizerProvider.notifier).stop();
+  ref.read(mempoolProvider.notifier).clear();
+  // Reset selected-account state so we don't carry an id from the old network.
+  await coinContext.setAccount(account: 0);
+  ref.read(selectedAccountIdProvider.notifier).set(0);
+
+  // 2/3. Open + wire the target database.
+  final c = await openAndWireDatabase(
+    ref,
+    dbFilepath: dbFilepath,
+    net: net,
+    askPassword: askPassword,
+  );
+  if (c == null) {
+    // Aborted: restart sync on whatever DB is still active and bail.
+    ref.read(synchronizerProvider.notifier).autoSync();
+    return false;
+  }
+
+  // 4. Persist the selection.
+  await prefs.setString("database", targetDbName);
+  await prefs.setInt("network", net.coin);
+
+  // 5. Invalidate every network-scoped provider so the UI rebuilds against the
+  // new database.
+  ref.invalidate(appSettingsProvider);
+  ref.invalidate(getAccountsProvider);
+  ref.invalidate(getCurrentAccountProvider);
+  ref.invalidate(accountsPageDataProvider);
+  // Force a fresh chain-height fetch against the new network (the height cache
+  // is keyed to the previous coin context).
+  ref.invalidate(currentHeightProvider);
+
+  // 6. Restart background work against the new network.
+  final settings = await ref.read(appSettingsProvider.future);
+  if (settings.vault && !settings.offline) {
+    await ref.read(vaultProvider.future);
+  }
+  ref.read(synchronizerProvider.notifier).autoSync();
+  final mempool = ref.read(mempoolProvider.notifier);
+  unawaited(Future(mempool.runMempoolListener));
+  return true;
 }

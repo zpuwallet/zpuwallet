@@ -3,7 +3,7 @@ import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zkool/prefs.dart';
 
 class DisclaimerPage extends ConsumerStatefulWidget {
   const DisclaimerPage({super.key});
@@ -86,7 +86,7 @@ class _DisclaimerPageState extends ConsumerState<DisclaimerPage> {
   }
 
   void onContinue() async {
-    final prefs = SharedPreferencesAsync();
+    final prefs = AppPrefs();
     await prefs.setBool("disclaimer_accepted", true);
     if (!mounted) return;
     GoRouter.of(context).go("/splash");

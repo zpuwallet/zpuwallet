@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
     let server_type: u8 = if zebra { 1 } else { 0 };
     tracing::info!("db_path {db_path} lwd_url {lwd_url} port {port} zebra {zebra}");
     let coin = Coin::new()
-        .open_database(db_path, None)
+        .open_database(db_path, None, None)
         .await?
         .set_lwd(server_type, lwd_url)?;
 
