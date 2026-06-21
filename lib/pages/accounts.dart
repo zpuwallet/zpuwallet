@@ -8,6 +8,7 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:zkool/main.dart';
+import 'package:zkool/network.dart';
 import 'package:zkool/pages/account.dart';
 import 'package:zkool/router.dart';
 import 'package:zkool/src/rust/api/account.dart';
@@ -128,13 +129,14 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
                         height: SmallProgressWidget(account, style: tt.labelSmall),
                       ),
                       onTap: () => onOpen(context, account),
+                      onLongPressStart: (details) => onSelectChanged?.call(!(selected ?? false)),
                     ),
                     const Divider(height: 1, indent: 72),
                   ],
                 ),
               );
             },
-            title: "Account List",
+            title: networkTitle(appName, networkForName(pageData.settings.net)),
             createBuilder: (context) => GoRouter.of(context).push("/account/new"),
             editBuilder: (context, a) => GoRouter.of(context).push("/account/edit", extra: a),
             deleteBuilder: (context, accounts) async {
@@ -208,6 +210,7 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
 
   List<Widget> _buildAppBarActions() {
     return [
+      IconButton(onPressed: onSwitchNetwork, tooltip: "Switch the active network (Mainnet / Testnet / Regtest)", icon: const Icon(Icons.public)),
       IconButton(onPressed: onSettings, tooltip: "Open Settings", icon: const Icon(Icons.settings)),
       IconButton(onPressed: onSync, tooltip: "Synchronize all enabled accounts or the accounts currently selected", icon: const Icon(Icons.sync)),
       PopupMenuButton<String>(
@@ -290,6 +293,10 @@ class AccountListPageState extends ConsumerState<AccountListPage> with RouteAwar
 
   void onSettings() async {
     await GoRouter.of(context).push('/settings');
+  }
+
+  void onSwitchNetwork() async {
+    await GoRouter.of(context).push('/networks');
   }
 
   void onPrice() {

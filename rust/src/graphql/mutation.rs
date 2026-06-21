@@ -137,6 +137,7 @@ impl Mutation {
             100_000,
             transparent_limit,
             10_000,
+            crate::sync::DEFAULT_BLOCK_CHUNK_SIZE,
             fast,
             &context.coin,
         )
@@ -158,6 +159,7 @@ impl Mutation {
             100_000,
             transparent_limit,
             10_000,
+            crate::sync::DEFAULT_BLOCK_CHUNK_SIZE,
             fast,
             &context.coin,
         )

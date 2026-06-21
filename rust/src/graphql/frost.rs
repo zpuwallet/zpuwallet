@@ -6,7 +6,7 @@ use crate::{
     api::{coin::Coin, frost::get_funding_account},
     frost::{dkg::in_dkg, sign::in_sign},
     graphql::Context,
-    sync::{synchronize_impl, DEFAULT_ACTIONS_PER_SYNC},
+    sync::{synchronize_impl, DEFAULT_ACTIONS_PER_SYNC, DEFAULT_BLOCK_CHUNK_SIZE},
 };
 
 pub async fn dkg_start(
@@ -80,6 +80,7 @@ pub async fn new_block(coin: Coin) -> anyhow::Result<()> {
         DEFAULT_ACTIONS_PER_SYNC,
         1,
         100,
+        DEFAULT_BLOCK_CHUNK_SIZE,
         false,
         &coin,
     )

@@ -203,10 +203,39 @@ Uint8List stringToTxId(String txid) {
   return Uint8List.fromList(bytes.reversed.toList());
 }
 
+/// True when running as the portable build (executable named `zkool_portable`).
+/// In portable mode all data lives in a `./db` directory next to the exe.
+bool get isPortable {
+  final exe = Platform.resolvedExecutable;
+  final base = exe.split(Platform.pathSeparator).last.toLowerCase();
+  return base.startsWith('zkool_portable');
+}
+
+/// Single source of truth for where the app stores its data.
+/// Portable build -> `<exe dir>/db`; otherwise the OS documents directory.
+Future<Directory> getDataDirectory() async {
+  if (isPortable) {
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final dir = Directory('$exeDir${Platform.pathSeparator}db');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+  return getApplicationDocumentsDirectory();
+}
+
+/// Joins [dir] and [name] using the platform separator and normalizes any
+/// mixed slashes so Windows paths render consistently (e.g.
+/// `C:\Users\User\Documents\zkool.db` instead of `...Documents/zkool.db`).
+String joinPath(String dir, String name) {
+  final sep = Platform.pathSeparator;
+  var path = '$dir$sep$name';
+  if (Platform.isWindows) path = path.replaceAll('/', sep);
+  return path;
+}
+
 Future<String> getFullDatabasePath(String dbName) async {
-  final dbDir = await getApplicationDocumentsDirectory();
-  final dbFilepath = '${dbDir.path}/$dbName.db';
-  return dbFilepath;
+  final dbDir = await getDataDirectory();
+  return joinPath(dbDir.path, '$dbName.db');
 }
 
 Future<AwesomeDialog> showMessage(BuildContext context, String message, {String? title, bool dismissable = true}) async {

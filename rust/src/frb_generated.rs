@@ -1077,6 +1077,7 @@ fn wire__crate__api__coin__coin_open_database_impl(
             let api_that = <crate::api::coin::Coin>::sse_decode(&mut deserializer);
             let api_db_filepath = <String>::sse_decode(&mut deserializer);
             let api_password = <Option<String>>::sse_decode(&mut deserializer);
+            let api_coin = <Option<u8>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1085,6 +1086,7 @@ fn wire__crate__api__coin__coin_open_database_impl(
                             api_that,
                             api_db_filepath,
                             api_password,
+                            api_coin,
                         )
                         .await?;
                         Ok(output_ok)
@@ -5735,6 +5737,7 @@ fn wire__crate__api__sync__synchronize_impl(
             let api_actions_per_sync = <u32>::sse_decode(&mut deserializer);
             let api_transparent_limit = <u32>::sse_decode(&mut deserializer);
             let api_checkpoint_age = <u32>::sse_decode(&mut deserializer);
+            let api_block_chunk_size = <u32>::sse_decode(&mut deserializer);
             let api_fast = <bool>::sse_decode(&mut deserializer);
             let api_c = <crate::api::coin::Coin>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -5748,6 +5751,7 @@ fn wire__crate__api__sync__synchronize_impl(
                             api_actions_per_sync,
                             api_transparent_limit,
                             api_checkpoint_age,
+                            api_block_chunk_size,
                             api_fast,
                             &api_c,
                         )

@@ -8,6 +8,7 @@ import 'package:zkool/main.dart';
 import 'package:zkool/pages/sweep.dart';
 import 'package:zkool/src/rust/api/account.dart';
 import 'package:zkool/src/rust/api/coin.dart';
+import 'package:zkool/src/rust/api/network.dart';
 import 'package:zkool/store.dart';
 import 'package:zkool/utils.dart';
 import 'package:zkool/widgets/error_display.dart';
@@ -26,6 +27,9 @@ class ReceivePageState extends ConsumerState<ReceivePage> {
   Addresses? addresses;
   int uaPools = 0;
   int availablePools = 0;
+  // BIP-44/ZIP-32 coin type, derived from the active network. Zcash mainnet
+  // uses 133'; test/regtest networks use 1' (SLIP-44 testnet convention).
+  int coinType = 133;
 
   @override
   void initState() {
@@ -37,14 +41,44 @@ class ReceivePageState extends ConsumerState<ReceivePage> {
       final pools = a.pool; // All pools including transparent
       final defaultPools = pools & 6; // Default to shielded pools only
       final addrs = await getAddresses(uaPools: defaultPools, c: c);
+      final net = await getNetworkName(c: c);
       setState(() {
         account = a.account;
         addresses = addrs;
         availablePools = pools;
         uaPools = defaultPools;
+        coinType = net == "main" || net == "mainnet" ? 133 : 1;
       });
     });
   }
+
+  // Transparent addresses use the BIP-44 path
+  //   m/44'/{coin_type}'/{account}'/{scope}/{diversifier_index}
+  // (scope 0 = external receive). See rust/src/account.rs derive_transparent_address.
+  String transparentPath() =>
+      "m/44'/$coinType'/${account!.aindex}'/0/${addresses!.diversifierIndex}";
+
+  // Shielded (Sapling/Orchard) keys use the ZIP-32 path
+  //   m/32'/{coin_type}'/{account}'
+  // with the receiver selected by the diversifier index (not a path level).
+  // See rust/src/account.rs (usk.sapling()/usk.orchard()).
+  String shieldedPath() => "m/32'/$coinType'/${account!.aindex}'";
+
+  // A short, copyable description of how an address was derived.
+  String derivationLabel({required bool transparent}) => transparent
+      ? "Path: ${transparentPath()}"
+      : "Path: ${shieldedPath()}  (diversifier ${addresses!.diversifierIndex})";
+
+  Widget derivationInfo({required bool transparent}) => Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+          derivationLabel(transparent: transparent),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontFamily: "monospace",
+                color: Theme.of(context).hintColor,
+              ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +126,13 @@ class ReceivePageState extends ConsumerState<ReceivePage> {
                 Gap(8),
                 ListTile(
                   title: Text("Unified Address"),
-                  subtitle: CopyableText(addresses.ua!),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CopyableText(addresses.ua!),
+                      derivationInfo(transparent: false),
+                    ],
+                  ),
                   trailing: IconButton(
                     tooltip: "Show address as a QR Code",
                     icon: Icon(Icons.qr_code),
@@ -103,7 +143,13 @@ class ReceivePageState extends ConsumerState<ReceivePage> {
               if (addresses.oaddr != null)
                 ListTile(
                   title: Text("Orchard only Address"),
-                  subtitle: CopyableText(addresses.oaddr!),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CopyableText(addresses.oaddr!),
+                      derivationInfo(transparent: false),
+                    ],
+                  ),
                   trailing: IconButton(
                     icon: Icon(Icons.qr_code),
                     onPressed: () => onShowQR("Orchard", addresses.oaddr!),
@@ -112,7 +158,13 @@ class ReceivePageState extends ConsumerState<ReceivePage> {
               if (addresses.saddr != null)
                 ListTile(
                   title: Text("Sapling Address"),
-                  subtitle: CopyableText(addresses.saddr!),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CopyableText(addresses.saddr!),
+                      derivationInfo(transparent: false),
+                    ],
+                  ),
                   leading: account.hw != 0 ? IconButton(onPressed: onCheckSapling, icon: Icon(Icons.check)) : null,
                   trailing: IconButton(
                     icon: Icon(Icons.qr_code),
@@ -122,7 +174,13 @@ class ReceivePageState extends ConsumerState<ReceivePage> {
               if (addresses.taddr != null)
                 ListTile(
                   title: Text("Transparent Address"),
-                  subtitle: CopyableText(addresses.taddr!),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CopyableText(addresses.taddr!),
+                      derivationInfo(transparent: true),
+                    ],
+                  ),
                   leading: account.hw != 0 ? IconButton(onPressed: onCheckTransparent, icon: Icon(Icons.check)) : null,
                   trailing: IconButton(
                     icon: Icon(Icons.qr_code),

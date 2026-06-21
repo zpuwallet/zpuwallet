@@ -1332,6 +1332,7 @@ mixin _$AppSettings {
   String get blockExplorer;
   String get syncInterval; // in blocks
   String get actionsPerSync;
+  String get blockChunkSize; // blocks per GetBlockRange window
   bool get useTor;
   String get proxy;
   String get coingecko;
@@ -1371,6 +1372,8 @@ mixin _$AppSettings {
                 other.syncInterval == syncInterval) &&
             (identical(other.actionsPerSync, actionsPerSync) ||
                 other.actionsPerSync == actionsPerSync) &&
+            (identical(other.blockChunkSize, blockChunkSize) ||
+                other.blockChunkSize == blockChunkSize) &&
             (identical(other.useTor, useTor) || other.useTor == useTor) &&
             (identical(other.proxy, proxy) || other.proxy == proxy) &&
             (identical(other.coingecko, coingecko) ||
@@ -1407,6 +1410,7 @@ mixin _$AppSettings {
         blockExplorer,
         syncInterval,
         actionsPerSync,
+        blockChunkSize,
         useTor,
         proxy,
         coingecko,
@@ -1426,7 +1430,7 @@ mixin _$AppSettings {
 
   @override
   String toString() {
-    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode, transactionTableMode: $transactionTableMode, currency: $currency)';
+    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, blockChunkSize: $blockChunkSize, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode, transactionTableMode: $transactionTableMode, currency: $currency)';
   }
 }
 
@@ -1444,6 +1448,7 @@ abstract mixin class $AppSettingsCopyWith<$Res> {
       String blockExplorer,
       String syncInterval,
       String actionsPerSync,
+      String blockChunkSize,
       bool useTor,
       String proxy,
       String coingecko,
@@ -1482,6 +1487,7 @@ class _$AppSettingsCopyWithImpl<$Res> implements $AppSettingsCopyWith<$Res> {
     Object? blockExplorer = null,
     Object? syncInterval = null,
     Object? actionsPerSync = null,
+    Object? blockChunkSize = null,
     Object? useTor = null,
     Object? proxy = null,
     Object? coingecko = null,
@@ -1526,6 +1532,10 @@ class _$AppSettingsCopyWithImpl<$Res> implements $AppSettingsCopyWith<$Res> {
       actionsPerSync: null == actionsPerSync
           ? _self.actionsPerSync
           : actionsPerSync // ignore: cast_nullable_to_non_nullable
+              as String,
+      blockChunkSize: null == blockChunkSize
+          ? _self.blockChunkSize
+          : blockChunkSize // ignore: cast_nullable_to_non_nullable
               as String,
       useTor: null == useTor
           ? _self.useTor
@@ -1700,6 +1710,7 @@ extension AppSettingsPatterns on AppSettings {
             String blockExplorer,
             String syncInterval,
             String actionsPerSync,
+            String blockChunkSize,
             bool useTor,
             String proxy,
             String coingecko,
@@ -1729,6 +1740,7 @@ extension AppSettingsPatterns on AppSettings {
             _that.blockExplorer,
             _that.syncInterval,
             _that.actionsPerSync,
+            _that.blockChunkSize,
             _that.useTor,
             _that.proxy,
             _that.coingecko,
@@ -1772,6 +1784,7 @@ extension AppSettingsPatterns on AppSettings {
             String blockExplorer,
             String syncInterval,
             String actionsPerSync,
+            String blockChunkSize,
             bool useTor,
             String proxy,
             String coingecko,
@@ -1800,6 +1813,7 @@ extension AppSettingsPatterns on AppSettings {
             _that.blockExplorer,
             _that.syncInterval,
             _that.actionsPerSync,
+            _that.blockChunkSize,
             _that.useTor,
             _that.proxy,
             _that.coingecko,
@@ -1840,6 +1854,7 @@ extension AppSettingsPatterns on AppSettings {
             String blockExplorer,
             String syncInterval,
             String actionsPerSync,
+            String blockChunkSize,
             bool useTor,
             String proxy,
             String coingecko,
@@ -1868,6 +1883,7 @@ extension AppSettingsPatterns on AppSettings {
             _that.blockExplorer,
             _that.syncInterval,
             _that.actionsPerSync,
+            _that.blockChunkSize,
             _that.useTor,
             _that.proxy,
             _that.coingecko,
@@ -1900,6 +1916,7 @@ class _AppSettings implements AppSettings {
       required this.blockExplorer,
       required this.syncInterval,
       required this.actionsPerSync,
+      required this.blockChunkSize,
       required this.useTor,
       required this.proxy,
       required this.coingecko,
@@ -1931,6 +1948,9 @@ class _AppSettings implements AppSettings {
 // in blocks
   @override
   final String actionsPerSync;
+  @override
+  final String blockChunkSize;
+// blocks per GetBlockRange window
   @override
   final bool useTor;
   @override
@@ -1986,6 +2006,8 @@ class _AppSettings implements AppSettings {
                 other.syncInterval == syncInterval) &&
             (identical(other.actionsPerSync, actionsPerSync) ||
                 other.actionsPerSync == actionsPerSync) &&
+            (identical(other.blockChunkSize, blockChunkSize) ||
+                other.blockChunkSize == blockChunkSize) &&
             (identical(other.useTor, useTor) || other.useTor == useTor) &&
             (identical(other.proxy, proxy) || other.proxy == proxy) &&
             (identical(other.coingecko, coingecko) ||
@@ -2022,6 +2044,7 @@ class _AppSettings implements AppSettings {
         blockExplorer,
         syncInterval,
         actionsPerSync,
+        blockChunkSize,
         useTor,
         proxy,
         coingecko,
@@ -2041,7 +2064,7 @@ class _AppSettings implements AppSettings {
 
   @override
   String toString() {
-    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode, transactionTableMode: $transactionTableMode, currency: $currency)';
+    return 'AppSettings(dbName: $dbName, net: $net, isLightNode: $isLightNode, lwd: $lwd, blockExplorer: $blockExplorer, syncInterval: $syncInterval, actionsPerSync: $actionsPerSync, blockChunkSize: $blockChunkSize, useTor: $useTor, proxy: $proxy, coingecko: $coingecko, recovery: $recovery, needPin: $needPin, pinUnlockedAt: $pinUnlockedAt, offline: $offline, getFx: $getFx, qrSettings: $qrSettings, vault: $vault, expertMode: $expertMode, paletteName: $paletteName, darkMode: $darkMode, transactionTableMode: $transactionTableMode, currency: $currency)';
   }
 }
 
@@ -2061,6 +2084,7 @@ abstract mixin class _$AppSettingsCopyWith<$Res>
       String blockExplorer,
       String syncInterval,
       String actionsPerSync,
+      String blockChunkSize,
       bool useTor,
       String proxy,
       String coingecko,
@@ -2100,6 +2124,7 @@ class __$AppSettingsCopyWithImpl<$Res> implements _$AppSettingsCopyWith<$Res> {
     Object? blockExplorer = null,
     Object? syncInterval = null,
     Object? actionsPerSync = null,
+    Object? blockChunkSize = null,
     Object? useTor = null,
     Object? proxy = null,
     Object? coingecko = null,
@@ -2144,6 +2169,10 @@ class __$AppSettingsCopyWithImpl<$Res> implements _$AppSettingsCopyWith<$Res> {
       actionsPerSync: null == actionsPerSync
           ? _self.actionsPerSync
           : actionsPerSync // ignore: cast_nullable_to_non_nullable
+              as String,
+      blockChunkSize: null == blockChunkSize
+          ? _self.blockChunkSize
+          : blockChunkSize // ignore: cast_nullable_to_non_nullable
               as String,
       useTor: null == useTor
           ? _self.useTor

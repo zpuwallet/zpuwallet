@@ -10,7 +10,7 @@ import 'package:form_builder_validators/form_builder_validators.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zkool/prefs.dart';
 import 'package:zkool/src/rust/api/db.dart';
 import 'package:zkool/store.dart';
 import 'package:zkool/utils.dart';
@@ -33,7 +33,7 @@ class DatabaseManagerState extends ConsumerState<DatabaseManagerPage> {
   }
 
   Future<void> refresh() async {
-    final dbDir = await getApplicationDocumentsDirectory();
+    final dbDir = await getDataDirectory();
     dbNames = (await listDbNames(dir: dbDir.path)).sorted().map((n) => (n, false)).toList();
     setState(() {});
   }
@@ -131,7 +131,8 @@ class DatabaseManagerState extends ConsumerState<DatabaseManagerPage> {
       final (name, password) = res;
       final dbFilepath = await getFullDatabasePath(name);
       final c = coinContext.coin;
-      final c2 = await c.openDatabase(dbFilepath: dbFilepath, password: password);
+      // New databases created here belong to the currently-active network.
+      final c2 = await c.openDatabase(dbFilepath: dbFilepath, password: password, coin: c.coin);
       coinContext.set(coin: c2);
       await refresh();
     }
@@ -250,14 +251,14 @@ class DatabaseManagerState extends ConsumerState<DatabaseManagerPage> {
   }
 
   Future<void> onOK() async {
-    final prefs = SharedPreferencesAsync();
+    final prefs = AppPrefs();
     await prefs.remove("recovery");
     GoRouter.of(context).go("/splash");
   }
 }
 
 Future<void> selectDatabase(WidgetRef ref, String dbName) async {
-  final prefs = SharedPreferencesAsync();
+  final prefs = AppPrefs();
   await prefs.setString("database", dbName);
   ref.invalidate(appSettingsProvider);
 }

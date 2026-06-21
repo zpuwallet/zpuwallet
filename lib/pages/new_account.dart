@@ -411,7 +411,10 @@ class NewAccountPageState extends ConsumerState<NewAccountPage> {
           }
         }
         ref.invalidate(getAccountsProvider);
-        if (mounted) GoRouter.of(context).pop();
+        // After an import (which may have run a transparent-address scan), go to
+        // the account list ("/accounts") so the newly imported account is
+        // visible, instead of popping back into the transparent-scan flow.
+        if (mounted) GoRouter.of(context).go("/accounts");
       } on AnyhowException catch (e) {
         await showException(context, e.message);
         dialog?.dismiss();

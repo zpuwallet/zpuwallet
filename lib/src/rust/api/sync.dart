@@ -16,6 +16,7 @@ Stream<SyncProgress> synchronize(
         required int actionsPerSync,
         required int transparentLimit,
         required int checkpointAge,
+        required int blockChunkSize,
         required bool fast,
         required Coin c}) =>
     RustLib.instance.api.crateApiSyncSynchronize(
@@ -24,6 +25,7 @@ Stream<SyncProgress> synchronize(
         actionsPerSync: actionsPerSync,
         transparentLimit: transparentLimit,
         checkpointAge: checkpointAge,
+        blockChunkSize: blockChunkSize,
         fast: fast,
         c: c);
 

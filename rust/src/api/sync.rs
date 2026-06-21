@@ -23,6 +23,7 @@ pub async fn synchronize(
     actions_per_sync: u32,
     transparent_limit: u32,
     checkpoint_age: u32,
+    block_chunk_size: u32,
     fast: bool,
     c: &Coin,
 ) -> Result<u32> {
@@ -33,6 +34,7 @@ pub async fn synchronize(
         actions_per_sync,
         transparent_limit,
         checkpoint_age,
+        block_chunk_size,
         fast,
         c,
     )

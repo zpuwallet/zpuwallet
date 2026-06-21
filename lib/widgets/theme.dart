@@ -89,6 +89,7 @@ class TransactionTile extends StatelessWidget {
   final BigInt? zsaValue;
   final String? zsaLabel;
   final String? contactName;
+  final int? confirmations;
 
   const TransactionTile({
     super.key,
@@ -102,7 +103,37 @@ class TransactionTile extends StatelessWidget {
     this.zsaValue,
     this.zsaLabel,
     this.contactName,
+    this.confirmations,
   });
+
+  /// Build the title: the transaction [label], optionally followed by a small,
+  /// muted "( N conf )" confirmation suffix, and optionally the "→ contactName"
+  /// recipient. Both decorations are independent and can appear together.
+  Widget _buildTitle(BuildContext context) {
+    final base = DefaultTextStyle.of(context).style;
+    final smaller = base.fontSize == null ? null : base.fontSize! * 0.8;
+    final Widget labelWidget = confirmations != null
+        ? Text.rich(
+            TextSpan(children: [
+              TextSpan(text: label),
+              TextSpan(
+                text: " ( $confirmations conf )",
+                style: TextStyle(fontSize: smaller, color: base.color?.withAlpha(160)),
+              ),
+            ]),
+            overflow: TextOverflow.ellipsis,
+          )
+        : Text(label, overflow: TextOverflow.ellipsis);
+    if (contactName != null) {
+      return Row(
+        children: [
+          Flexible(child: labelWidget),
+          Text(' → $contactName', style: TextStyle(color: color, fontWeight: FontWeight.w500)),
+        ],
+      );
+    }
+    return labelWidget;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,14 +149,7 @@ class TransactionTile extends StatelessWidget {
         ),
         child: Icon(icon, color: color),
       ),
-      title: contactName != null
-          ? Row(
-              children: [
-                Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
-                Text(' → $contactName', style: TextStyle(color: color, fontWeight: FontWeight.w500)),
-              ],
-            )
-          : Text(label),
+      title: _buildTitle(context),
       subtitle: d,
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,

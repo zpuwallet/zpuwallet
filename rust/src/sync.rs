@@ -43,6 +43,10 @@ use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
 pub const DEFAULT_ACTIONS_PER_SYNC: u32 = 10000u32;
 pub const DEFAULT_TRANSPARENT_LIMIT: u32 = 100u32;
+/// Number of blocks fetched per `GetBlockRange` stream. The full sync range is
+/// walked in windows of this size so each gRPC stream stays short-lived and
+/// resumable. See `shielded_sync`.
+pub const DEFAULT_BLOCK_CHUNK_SIZE: u32 = 500u32;
 
 pub use zcash_trees::types::{BlockHeader, Issuance, Note, Transaction, WarpSyncMessage, UTXO};
 pub use zcash_trees::types::SyncError;
@@ -85,6 +89,7 @@ pub async fn synchronize_impl<S: Sink<SyncProgress> + Send + 'static>(
     actions_per_sync: u32,
     transparent_limit: u32,
     checkpoint_age: u32,
+    block_chunk_size: u32,
     noskip_details: bool,
     c: &Coin,
 ) -> Result<u32> {
@@ -229,8 +234,9 @@ pub async fn synchronize_impl<S: Sink<SyncProgress> + Send + 'static>(
                 start_height,
                 end_height,
                 actions_per_sync,
+                block_chunk_size,
                 tx_progress.clone(),
-                tx_cancel.subscribe(),
+                &tx_cancel,
             )
             .await?;
 
@@ -636,8 +642,83 @@ fn resolve_diversifier_index(
     }
 }
 
+/// Run the shielded sync, walking `start..=end` in fixed-size block windows.
+///
+/// Each window opens a *fresh* `GetBlockRange` stream over a bounded height
+/// range and persists progress (witnesses, headers, `sync_heights`) before the
+/// next window starts. This keeps every stream well under any server's deadline,
+/// makes rescans resumable across windows, and isolates a dropped stream to a
+/// single window instead of restarting the whole range.
 #[allow(clippy::too_many_arguments)]
 pub async fn shielded_sync(
+    network: &Network,
+    pool: &SqlitePool,
+    client: &mut Client,
+    accounts: &[(u32, bool)],
+    start: u32,
+    end: u32,
+    actions_per_sync: u32,
+    block_chunk_size: u32,
+    tx_progress: Sender<SyncProgress>,
+    tx_cancel: &broadcast::Sender<()>,
+) -> Result<()> {
+    let activation_height: u32 = network
+        .activation_height(NetworkUpgrade::Sapling)
+        .unwrap()
+        .into();
+    let start = start.max(activation_height);
+    let end = end.max(activation_height);
+
+    // A window size of 0 would never advance; fall back to the whole range.
+    let chunk = block_chunk_size.max(1);
+
+    // Subscribe once, before the loop: a broadcast receiver only sees signals
+    // sent after it subscribed, so a fresh per-iteration subscription could miss
+    // a cancel that fired mid-window.
+    let mut rx_cancel_check = tx_cancel.subscribe();
+
+    let mut window_start = start;
+    while window_start <= end {
+        // Stop between windows if a cancellation was requested. Each window
+        // commits its progress, so the next sync resumes from where we left off.
+        match rx_cancel_check.try_recv() {
+            Ok(()) | Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                info!("Shielded sync cancelled between windows");
+                break;
+            }
+            Err(broadcast::error::TryRecvError::Closed) => break,
+            Err(broadcast::error::TryRecvError::Empty) => {}
+        }
+
+        let window_end = window_start.saturating_add(chunk - 1).min(end);
+        info!(
+            "shielded_sync window {}..={} (of {}..={})",
+            window_start, window_end, start, end
+        );
+        shielded_sync_window(
+            network,
+            pool,
+            client,
+            accounts,
+            window_start,
+            window_end,
+            actions_per_sync,
+            tx_progress.clone(),
+            tx_cancel.subscribe(),
+        )
+        .await?;
+
+        window_start = window_end + 1;
+    }
+
+    Ok(())
+}
+
+/// Sync a single bounded block window. This is the original `shielded_sync`
+/// body: it opens one `GetBlockRange` stream over `start..=end`, decrypts and
+/// commits to the database, then returns once the window is fully processed.
+#[allow(clippy::too_many_arguments)]
+async fn shielded_sync_window(
     network: &Network,
     pool: &SqlitePool,
     client: &mut Client,
@@ -648,13 +729,6 @@ pub async fn shielded_sync(
     tx_progress: Sender<SyncProgress>,
     rx_cancel: broadcast::Receiver<()>,
 ) -> Result<()> {
-    let activation_height: u32 = network
-        .activation_height(NetworkUpgrade::Sapling)
-        .unwrap()
-        .into();
-    let start = start.max(activation_height);
-    let end = end.max(activation_height);
-
     let accounts = accounts.to_vec();
     let db_writer_task = {
         let (s, o) = get_tree_state(network, client, start - 1).await?;
